@@ -39,7 +39,15 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def on_startup():
+        import shutil
+        import os
         await init_db()
+        # Clean up temporary sessions from previous runs
+        if os.path.exists("playwright_sessions"):
+            try:
+                shutil.rmtree("playwright_sessions")
+            except Exception:
+                pass
 
     # ── API Routers ─────────────────────────────────────────────
     app.include_router(upload_router.router,     prefix="/api")

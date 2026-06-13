@@ -17,7 +17,7 @@ from app.api.deps import get_db, get_session_id
 from app.db.models import (
     UploadBatch, AttendanceRecord, WorkerMapping, SubmissionResult,
 )
-from app.automation.submission_engine import validate_form, PlaywrightSubmissionEngine
+from app.automation.submission_engine import validate_form, PlaywrightSubmissionEngine, check_google_session_status
 
 router = APIRouter(prefix="/automation", tags=["Automation"])
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Each submitted job runs its own asyncio.run() → creates a fresh ProactorEventLoop
 # on Windows, which supports subprocess creation (unlike uvicorn's SelectorEventLoop).
 _playwright_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="playwright")
+_active_connections = set()
 
 
 # ── Request schemas ──────────────────────────────────────────────────────────
@@ -93,6 +94,92 @@ def _sync_playwright_background(batch_id: str, records_payload: list, form_url: 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+@router.get("/google/status")
+async def get_google_status(session_id: str = Depends(get_session_id)):
+    if session_id in _active_connections:
+        return {"connected": False, "email": None, "connecting": True}
+        
+    loop = asyncio.get_running_loop()
+    status = await loop.run_in_executor(
+        _playwright_pool,
+        lambda: asyncio.run(check_google_session_status(session_id)),
+    )
+    status["connecting"] = False
+    return status
+
+
+@router.post("/google/connect")
+async def connect_google(session_id: str = Depends(get_session_id)):
+    import os
+    from playwright.async_api import async_playwright
+    
+    if session_id in _active_connections:
+        return {"connected": False, "email": None, "connecting": True}
+        
+    session_dir = os.path.abspath(f"playwright_sessions/{session_id}")
+    os.makedirs(session_dir, exist_ok=True)
+    
+    async def run_headed_login_bg():
+        _active_connections.add(session_id)
+        try:
+            async with async_playwright() as p:
+                context = await p.chromium.launch_persistent_context(
+                    user_data_dir=session_dir,
+                    headless=False,
+                    args=["--disable-blink-features=AutomationControlled"],
+                )
+                try:
+                    page = await context.new_page()
+                    await page.goto("https://accounts.google.com")
+                    while len(context.pages) > 0:
+                        await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f"Error in headed login: {e}")
+                finally:
+                    await context.close()
+        finally:
+            _active_connections.discard(session_id)
+                
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(_playwright_pool, lambda: asyncio.run(run_headed_login_bg()))
+    
+    return {"connected": False, "email": None, "connecting": True}
+
+
+@router.post("/google/disconnect")
+async def disconnect_google(session_id: str = Depends(get_session_id)):
+    import shutil
+    import os
+    import time
+    import uuid
+    session_dir = os.path.abspath(f"playwright_sessions/{session_id}")
+    if os.path.exists(session_dir):
+        deleted = False
+        for _ in range(5):
+            try:
+                shutil.rmtree(session_dir)
+                deleted = True
+                break
+            except Exception:
+                await asyncio.sleep(0.5)
+        
+        if not deleted:
+            try:
+                trash_dir = os.path.abspath(f"playwright_sessions/trash_{uuid.uuid4().hex}")
+                os.rename(session_dir, trash_dir)
+                def delete_trash():
+                    try:
+                        shutil.rmtree(trash_dir)
+                    except Exception:
+                        pass
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, delete_trash)
+            except Exception as e:
+                logger.error(f"Failed to force disconnect session dir: {e}")
+                raise HTTPException(status_code=500, detail="Failed to disconnect due to file locks. Please try again.")
+    return {"connected": False, "email": None}
+
+
 @router.post("/validate")
 async def validate_google_form(
     req: ValidateRequest,
@@ -106,11 +193,23 @@ async def validate_google_form(
     if not req.form_url or not req.form_url.startswith("http"):
         raise HTTPException(status_code=400, detail="A valid form URL is required.")
 
-    # Run validate_form in a dedicated thread → fresh asyncio.run() → ProactorEventLoop
     loop = asyncio.get_running_loop()
+    
+    # Check Google account connection
+    google_status = await loop.run_in_executor(
+        _playwright_pool,
+        lambda: asyncio.run(check_google_session_status(session_id)),
+    )
+    if not google_status["connected"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please connect a Google account that has access to this form."
+        )
+
+    # Run validate_form in a dedicated thread → fresh asyncio.run() → ProactorEventLoop
     report = await loop.run_in_executor(
         _playwright_pool,
-        lambda: asyncio.run(validate_form(req.form_url)),
+        lambda: asyncio.run(validate_form(req.form_url, session_id)),
     )
     return report
 
@@ -140,6 +239,18 @@ async def run_automation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
     if batch.session_id != session_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    # Check Google account connection
+    loop = asyncio.get_running_loop()
+    google_status = await loop.run_in_executor(
+        _playwright_pool,
+        lambda: asyncio.run(check_google_session_status(session_id)),
+    )
+    if not google_status["connected"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please connect a Google account that has access to this form."
+        )
 
     form_url = batch.form_url
 

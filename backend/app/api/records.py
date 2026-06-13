@@ -129,6 +129,8 @@ async def reset_session(
     session_id: str = Depends(get_session_id),
 ):
     """Purge all attendance records, submission results, mapping history, and upload batches for the current session."""
+    import shutil
+    import os
     from app.db.models import SubmissionResult, AttendanceRecord, UploadBatch, WorkerMapping, Worker, FormProfile
 
     # Delete related children and session records
@@ -140,4 +142,35 @@ async def reset_session(
     await db.execute(delete(FormProfile).where(FormProfile.session_id == session_id))
 
     await db.commit()
+
+    # Wipe Playwright session context directory
+    session_dir = os.path.abspath(f"playwright_sessions/{session_id}")
+    if os.path.exists(session_dir):
+        import time
+        import uuid
+        import asyncio
+        deleted = False
+        for _ in range(5):
+            try:
+                shutil.rmtree(session_dir)
+                deleted = True
+                break
+            except Exception:
+                time.sleep(0.2)
+        
+        if not deleted:
+            try:
+                trash_dir = os.path.abspath(f"playwright_sessions/trash_{uuid.uuid4().hex}")
+                os.rename(session_dir, trash_dir)
+                def delete_trash():
+                    try:
+                        shutil.rmtree(trash_dir)
+                    except Exception:
+                        pass
+                import asyncio
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, delete_trash)
+            except Exception:
+                pass
+
     return {"message": "Session wiped successfully."}

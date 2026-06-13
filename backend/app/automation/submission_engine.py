@@ -148,14 +148,63 @@ async def detect_field_map(page: Page, form_url: str) -> Tuple[Dict[str, dict], 
     return field_map, found, missing
 
 
-async def validate_form(form_url: str) -> Dict[str, Any]:
+async def check_google_session_status(session_id: str) -> Dict[str, Any]:
+    """
+    Checks if there's a valid active Google login session for this session_id.
+    """
+    session_dir = os.path.abspath(f"playwright_sessions/{session_id}")
+    if not os.path.exists(session_dir):
+        return {"connected": False, "email": None}
+    
+    async with async_playwright() as p:
+        try:
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir=session_dir,
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+            page = await context.new_page()
+            await page.goto("https://myaccount.google.com/email", wait_until="networkidle", timeout=10000)
+            
+            url = page.url
+            if "accounts.google.com" in url:
+                await context.close()
+                return {"connected": False, "email": None}
+            
+            email = None
+            try:
+                elements = await page.locator("text=@").all()
+                for el in elements:
+                    text = await el.inner_text()
+                    if "@" in text and "." in text and len(text) < 100:
+                        for word in text.split():
+                            if "@" in word and "." in word:
+                                email = word.strip("()<>[],;:")
+                                break
+                    if email:
+                        break
+            except Exception:
+                pass
+            
+            await context.close()
+            if email:
+                return {"connected": True, "email": email}
+            
+            return {"connected": True, "email": "Connected Account"}
+        except Exception as e:
+            logger.warning(f"Error checking Google status for session {session_id}: {e}")
+            return {"connected": False, "email": None}
+
+
+async def validate_form(form_url: str, session_id: str) -> Dict[str, Any]:
     """
     Opens the Google Form, detects fields, returns a validation report.
     Does NOT submit anything.
     """
+    session_dir = os.path.abspath(f"playwright_sessions/{session_id}")
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
-            user_data_dir="playwright_user_data",
+            user_data_dir=session_dir,
             headless=True,
             args=["--disable-blink-features=AutomationControlled"],
         )
@@ -208,7 +257,7 @@ class PlaywrightSubmissionEngine:
 
         async with async_playwright() as p:
             context = await p.chromium.launch_persistent_context(
-                user_data_dir="playwright_user_data",
+                user_data_dir=f"playwright_sessions/{self.session_id}",
                 headless=headless,
                 args=["--disable-blink-features=AutomationControlled"],
             )
