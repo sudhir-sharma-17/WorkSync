@@ -25,7 +25,7 @@ function getSessionId(): string {
   return sessionStorage.getItem("session_id") || "";
 }
 
-function authHeaders(): Record<string, string> {
+function sessionHeaders(): Record<string, string> {
   const session_id = getSessionId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -55,7 +55,7 @@ export default function FormMapperPage() {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
       const res = await fetch(`${API_URL}/api/form-mapper/scan`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: sessionHeaders(),
         body: JSON.stringify({ form_url: formUrl }),
       });
 
@@ -117,7 +117,7 @@ export default function FormMapperPage() {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
       const res = await fetch(`${API_URL}/api/form-mapper/save`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: sessionHeaders(),
         body: JSON.stringify({
           form_url: formUrl,
           mappings: mappings,

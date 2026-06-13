@@ -28,7 +28,7 @@ function getSessionId(): string {
   return sessionStorage.getItem("session_id") || "";
 }
 
-function authHeaders(): Record<string, string> {
+function sessionHeaders(): Record<string, string> {
   const session_id = getSessionId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -53,7 +53,7 @@ export default function HistoryPage() {
   const fetchBatches = async () => {
     try {
       const res = await fetch(`${API_URL}/api/records/batches`, {
-        headers: authHeaders(),
+        headers: sessionHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -81,7 +81,7 @@ export default function HistoryPage() {
       setLoadingLogs(prev => ({ ...prev, [batchId]: true }));
       try {
         const res = await fetch(`${API_URL}/api/records/preview/${batchId}`, {
-          headers: authHeaders(),
+          headers: sessionHeaders(),
         });
         if (res.ok) {
           const data = await res.json();

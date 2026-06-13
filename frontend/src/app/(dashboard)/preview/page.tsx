@@ -68,7 +68,7 @@ function getSessionId(): string {
   return sessionStorage.getItem("session_id") || "";
 }
 
-function authHeaders(): Record<string, string> {
+function sessionHeaders(): Record<string, string> {
   const session_id = getSessionId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -130,7 +130,7 @@ export default function PreviewPage() {
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`${API_URL}/api/automation/status/${batchId}`, {
-          headers: authHeaders(),
+          headers: sessionHeaders(),
         });
         if (!res.ok) return;
         const data: BatchStatus = await res.json();
@@ -160,7 +160,7 @@ export default function PreviewPage() {
       }
       try {
         const res = await fetch(`${API_URL}/api/records/preview/${batchId}`, {
-          headers: authHeaders(),
+          headers: sessionHeaders(),
         });
         if (res.ok) {
           const data = await res.json();
@@ -170,7 +170,7 @@ export default function PreviewPage() {
 
           // Restore submission flow state if already running, completed, etc.
           const statusRes = await fetch(`${API_URL}/api/automation/status/${batchId}`, {
-            headers: authHeaders(),
+            headers: sessionHeaders(),
           });
           if (statusRes.ok) {
             const statusData: BatchStatus = await statusRes.json();
@@ -226,7 +226,7 @@ export default function PreviewPage() {
     try {
       const res = await fetch(`${API_URL}/api/automation/validate`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: sessionHeaders(),
         body: JSON.stringify({ form_url: formUrl }),
       });
       const data = await res.json();
@@ -255,7 +255,7 @@ export default function PreviewPage() {
     try {
       const res = await fetch(`${API_URL}/api/automation/run`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: sessionHeaders(),
         body: JSON.stringify({ batch_id: batchId, mode }),
       });
       if (!res.ok) {
@@ -274,12 +274,12 @@ export default function PreviewPage() {
   };
 
   const handlePause = async () => {
-    await fetch(`${API_URL}/api/automation/pause/${batchId}`, { method: "POST", headers: authHeaders() });
+    await fetch(`${API_URL}/api/automation/pause/${batchId}`, { method: "POST", headers: sessionHeaders() });
     if (pollRef.current) clearInterval(pollRef.current);
   };
 
   const handleCancel = async () => {
-    await fetch(`${API_URL}/api/automation/cancel/${batchId}`, { method: "POST", headers: authHeaders() });
+    await fetch(`${API_URL}/api/automation/cancel/${batchId}`, { method: "POST", headers: sessionHeaders() });
     if (pollRef.current) clearInterval(pollRef.current);
     setFlowStatus("cancelled");
   };

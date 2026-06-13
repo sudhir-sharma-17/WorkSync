@@ -33,7 +33,7 @@ function getSessionId(): string {
   return sessionStorage.getItem("session_id") || "";
 }
 
-function authHeaders(): Record<string, string> {
+function sessionHeaders(): Record<string, string> {
   const session_id = getSessionId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -56,7 +56,7 @@ export default function DashboardPage() {
     const fetchStats = async () => {
       try {
         const res = await fetch(`${API_URL}/api/records/batches`, {
-          headers: authHeaders(),
+          headers: sessionHeaders(),
         });
         if (res.ok) {
           const data = await res.json();
