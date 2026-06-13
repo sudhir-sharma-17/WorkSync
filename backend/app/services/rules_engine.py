@@ -5,8 +5,9 @@ from sqlalchemy.future import select
 from app.db.models import Worker, WorkerMapping
 
 class AttendanceRulesEngine:
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession, session_id: str):
         self.db = db_session
+        self.session_id = session_id
 
     async def process_batch(self, parsed_records: List[Dict[str, Any]]) -> Dict[str, Any]:
         results = {"valid_records": [], "errors": [], "debug": {
@@ -21,7 +22,7 @@ class AttendanceRulesEngine:
             return results
             
         # 2. Bulk fetch workers from DB
-        workers_stmt = select(Worker).where(Worker.name.in_(worker_names))
+        workers_stmt = select(Worker).where(Worker.name.in_(worker_names), Worker.session_id == self.session_id)
         workers_result = await self.db.execute(workers_stmt)
         workers = workers_result.scalars().all()
         
@@ -33,7 +34,7 @@ class AttendanceRulesEngine:
             if w_name not in worker_lookup:
                 # Infer worker type from name (e.g., CARPENTER_NARESH -> CARPENTER)
                 w_type = w_name.split("_")[0] if "_" in w_name else "GENERAL"
-                new_worker = Worker(name=w_name, worker_type=w_type)
+                new_worker = Worker(name=w_name, worker_type=w_type, session_id=self.session_id)
                 self.db.add(new_worker)
                 missing_workers.append(new_worker)
                 worker_lookup[w_name] = new_worker
@@ -42,7 +43,7 @@ class AttendanceRulesEngine:
             await self.db.flush()
         
         # 3. Bulk fetch BOQ Worker Mappings
-        mappings_stmt = select(WorkerMapping)
+        mappings_stmt = select(WorkerMapping).where(WorkerMapping.session_id == self.session_id)
         mappings_result = await self.db.execute(mappings_stmt)
         mappings = {m.worker_type: m for m in mappings_result.scalars().all()}
         
@@ -66,6 +67,7 @@ class AttendanceRulesEngine:
                     desc = "polishing"
 
                 new_mapping = WorkerMapping(
+                    session_id=self.session_id,
                     worker_type=worker.worker_type,
                     boq_category=boq_cat,
                     description=desc

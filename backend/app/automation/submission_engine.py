@@ -154,9 +154,13 @@ async def validate_form(form_url: str) -> Dict[str, Any]:
     Does NOT submit anything.
     """
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir="playwright_user_data",
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
         try:
+            page = context.pages[0] if context.pages else await context.new_page()
             field_map, found, missing = await detect_field_map(page, form_url)
             passed = len(missing) == 0
             return {
@@ -183,14 +187,14 @@ async def validate_form(form_url: str) -> Dict[str, Any]:
                 "message": f"Validation error: {str(e)}",
             }
         finally:
-            await browser.close()
+            await context.close()
 
 
 class PlaywrightSubmissionEngine:
-    def __init__(self, db_session: AsyncSession, batch_id: str, user_id: str, mode: str = "production"):
+    def __init__(self, db_session: AsyncSession, batch_id: str, session_id: str, mode: str = "production"):
         self.db = db_session
         self.batch_id = batch_id
-        self.user_id = user_id
+        self.session_id = session_id
         self.mode = mode  # 'production' | 'test_visible' | 'dry_run'
         os.makedirs("reports/errors", exist_ok=True)
 
@@ -394,7 +398,7 @@ class PlaywrightSubmissionEngine:
 
         res = SubmissionResult(
             record_id=str(record.get("id", uuid.uuid4())),
-            user_id=self.user_id,
+            session_id=self.session_id,
             timestamp=datetime.utcnow(),
             attendance_date=parsed_date,
             worker_name=record.get("worker_name", "Unknown"),

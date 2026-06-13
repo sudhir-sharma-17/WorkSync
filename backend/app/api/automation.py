@@ -13,9 +13,9 @@ from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from typing import Optional
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_session_id
 from app.db.models import (
-    User, UploadBatch, AttendanceRecord, WorkerMapping, SubmissionResult,
+    UploadBatch, AttendanceRecord, WorkerMapping, SubmissionResult,
 )
 from app.automation.submission_engine import validate_form, PlaywrightSubmissionEngine
 
@@ -47,7 +47,7 @@ async def _run_playwright_background(
     records_payload: list,
     form_url: str,
     mode: str,
-    user_id: str,
+    session_id: str,
 ):
     """
     Async implementation — called inside a fresh asyncio.run() from the thread pool.
@@ -66,7 +66,7 @@ async def _run_playwright_background(
         engine = PlaywrightSubmissionEngine(
             db_session=session,
             batch_id=batch_id,
-            user_id=user_id,
+            session_id=session_id,
             mode=mode,
         )
         try:
@@ -83,12 +83,12 @@ async def _run_playwright_background(
             await session.commit()
 
 
-def _sync_playwright_background(batch_id: str, records_payload: list, form_url: str, mode: str, user_id: str):
+def _sync_playwright_background(batch_id: str, records_payload: list, form_url: str, mode: str, session_id: str):
     """
     Sync wrapper executed in the thread pool.
     asyncio.run() creates a fresh ProactorEventLoop on Windows — Playwright compatible.
     """
-    asyncio.run(_run_playwright_background(batch_id, records_payload, form_url, mode, user_id))
+    asyncio.run(_run_playwright_background(batch_id, records_payload, form_url, mode, session_id))
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ def _sync_playwright_background(batch_id: str, records_payload: list, form_url: 
 @router.post("/validate")
 async def validate_google_form(
     req: ValidateRequest,
-    current_user: User = Depends(get_current_user),
+    session_id: str = Depends(get_session_id),
 ):
     """
     Open the Google Form URL with Playwright, detect all question labels,
@@ -120,7 +120,7 @@ async def run_automation(
     req: RunRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    session_id: str = Depends(get_session_id),
 ):
     """
     Trigger real Playwright form submissions for a batch.
@@ -138,7 +138,7 @@ async def run_automation(
     batch = batch_res.scalar_one_or_none()
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
-    if batch.user_id != current_user.id:
+    if batch.session_id != session_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     form_url = batch.form_url
@@ -178,7 +178,7 @@ async def run_automation(
         pending = pending[:cap]
 
     # Bulk-fetch BOQ mappings
-    mappings_res = await db.execute(select(WorkerMapping))
+    mappings_res = await db.execute(select(WorkerMapping).where(WorkerMapping.session_id == session_id))
     boq_map = {m.worker_type: m for m in mappings_res.scalars().all()}
 
     # Build serialisable records list for the background task
@@ -204,7 +204,7 @@ async def run_automation(
         records_payload,
         form_url,
         req.mode,
-        current_user.id,
+        session_id,
     )
 
     return {
@@ -219,12 +219,12 @@ async def run_automation(
 async def pause_batch(
     batch_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    session_id: str = Depends(get_session_id),
 ):
     batch = await db.get(UploadBatch, batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found.")
-    if batch.user_id != current_user.id:
+    if batch.session_id != session_id:
         raise HTTPException(status_code=403, detail="Forbidden")
     batch.status = "Paused"
     await db.commit()
@@ -235,12 +235,12 @@ async def pause_batch(
 async def cancel_batch(
     batch_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    session_id: str = Depends(get_session_id),
 ):
     batch = await db.get(UploadBatch, batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found.")
-    if batch.user_id != current_user.id:
+    if batch.session_id != session_id:
         raise HTTPException(status_code=403, detail="Forbidden")
     batch.status = "Cancelled"
     await db.commit()
@@ -251,7 +251,7 @@ async def cancel_batch(
 async def get_batch_status(
     batch_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    session_id: str = Depends(get_session_id),
 ):
     """Poll the live submission progress of a batch."""
     batch_res = await db.execute(
@@ -260,7 +260,7 @@ async def get_batch_status(
     batch = batch_res.scalar_one_or_none()
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
-    if batch.user_id != current_user.id:
+    if batch.session_id != session_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     records_res = await db.execute(
@@ -273,9 +273,13 @@ async def get_batch_status(
     n_pending = sum(1 for r in records if r.status == "Pending")
 
     # Fetch recent submission results for live logs
+    rec_ids = [str(r.id) for r in records]
     results_res = await db.execute(
         select(SubmissionResult)
-        .where(SubmissionResult.record_id.in_([str(r.id) for r in records]))
+        .where(
+            SubmissionResult.record_id.in_(rec_ids),
+            SubmissionResult.session_id == session_id,
+        )
         .order_by(SubmissionResult.timestamp.desc())
         .limit(20)
     )

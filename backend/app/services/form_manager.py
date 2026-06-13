@@ -13,7 +13,7 @@ class FormManagerService:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def save_mappings(self, profile_id: str, user_id: str, mappings: Dict[str, str]) -> Dict[str, Any]:
+    async def save_mappings(self, profile_id: str, session_id: str, mappings: Dict[str, str]) -> Dict[str, Any]:
         """
         mappings: { field_id (UUID string): system_field (str) }
         """
@@ -31,7 +31,7 @@ class FormManagerService:
         history = MappingHistory(
             profile_id=uuid.UUID(profile_id),
             snapshot=mappings,
-            updated_by=uuid.UUID(user_id) if user_id else None
+            updated_by_session=session_id
         )
         self.db.add(history)
         

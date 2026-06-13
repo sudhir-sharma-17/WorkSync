@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.api.deps import get_db, get_current_user
-from app.db.models import User, UploadBatch, AttendanceRecord, Worker
+from app.api.deps import get_db, get_session_id
+from app.db.models import UploadBatch, AttendanceRecord, Worker
 from app.parsers.excel_parser import ExcelParserService
 from app.services.rules_engine import AttendanceRulesEngine
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/upload", tags=["Upload"])
 @router.post("/diagnose", status_code=200)
 async def diagnose_excel(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    session_id: str = Depends(get_session_id),
 ):
     """
     Dry-run parse the Excel without saving anything.
@@ -82,7 +82,7 @@ async def upload_attendance(
     file: UploadFile = File(...),
     form_url: str = Form(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    session_id: str = Depends(get_session_id),
 ):
     # 1. Read file bytes
     content = await file.read()
@@ -106,7 +106,7 @@ async def upload_attendance(
     # 3. Create the UploadBatch row
     batch = UploadBatch(
         id=str(uuid.uuid4()),
-        user_id=current_user.id,
+        session_id=session_id,
         form_url=form_url,
         status="Processing",
     )
@@ -114,7 +114,7 @@ async def upload_attendance(
     await db.flush()
 
     # 4. Run rules engine (validates workers / BOQ mappings)
-    engine = AttendanceRulesEngine(db)
+    engine = AttendanceRulesEngine(db, session_id)
     engine_result = await engine.process_batch(raw_records)
     valid_records = engine_result.get("valid_records", [])
     rule_errors = engine_result.get("errors", [])
@@ -123,11 +123,13 @@ async def upload_attendance(
     worker_names = {r["worker_name"] for r in valid_records if r.get("worker_name")}
     workers_by_name: dict = {}
     if worker_names:
-        res = await db.execute(select(Worker).where(Worker.name.in_(worker_names)))
+        res = await db.execute(select(Worker).where(Worker.name.in_(worker_names), Worker.session_id == session_id))
         workers_by_name = {w.name: w for w in res.scalars().all()}
 
-    # 6. Persist AttendanceRecord rows
+    # 6. Bulk-prepare and insert AttendanceRecord rows
+    from sqlalchemy import insert
     current_year = datetime.datetime.utcnow().year
+    records_to_insert = []
     for rec in valid_records:
         worker = workers_by_name.get(rec.get("worker_name", ""))
         if not worker:
@@ -139,16 +141,19 @@ async def upload_attendance(
         except ValueError:
             att_date = datetime.date.today()
 
-        db.add(AttendanceRecord(
-            id=str(uuid.uuid4()),
-            user_id=current_user.id,
-            batch_id=batch.id,
-            worker_id=worker.id,
-            project_name=rec.get("project_name", ""),
-            attendance_date=att_date,
-            duration=rec.get("duration", "8-10 Hours"),
-            status="Pending",
-        ))
+        records_to_insert.append({
+            "id": str(uuid.uuid4()),
+            "session_id": session_id,
+            "batch_id": batch.id,
+            "worker_id": worker.id,
+            "project_name": rec.get("project_name", ""),
+            "attendance_date": att_date,
+            "duration": rec.get("duration", "8-10 Hours"),
+            "status": "Pending",
+        })
+
+    if records_to_insert:
+        await db.execute(insert(AttendanceRecord), records_to_insert)
 
     # Combine debug metrics
     parser_debug = parsed.get("debug", {})
