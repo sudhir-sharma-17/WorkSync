@@ -60,16 +60,23 @@ interface BatchStatus {
   logs: string[];
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { getApiUrl } from "@/lib/api";
+const API_URL = getApiUrl();
 
-function getToken(): string {
+function getSessionId(): string {
   if (typeof window === "undefined") return "";
-  return sessionStorage.getItem("token") || "";
+  return sessionStorage.getItem("session_id") || "";
 }
 
-function authHeaders() {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
+function authHeaders(): Record<string, string> {
+  const session_id = getSessionId();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (session_id) {
+    headers["X-Session-ID"] = session_id;
+  }
+  return headers;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -117,36 +124,6 @@ export default function PreviewPage() {
   // Edit modal
   const [editingRecord, setEditingRecord] = useState<PreviewRecord | null>(null);
 
-  // ── Load preview data ────────────────────────────────────────────────────
-  useEffect(() => {
-    const loadData = async () => {
-      if (!batchId) {
-        setLoadError("No batch ID provided. Please upload an attendance sheet first.");
-        setLoading(false);
-        return;
-      }
-      try {
-        const res = await fetch(`${API_URL}/api/records/preview/${batchId}`, {
-          headers: authHeaders(),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setRecords(data.records || []);
-          setFormUrl(data.form_url || "");
-          setDebugMeta(data.debug_meta || null);
-        } else {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `Server returned ${res.status}`);
-        }
-      } catch (err: any) {
-        setLoadError(err?.message || "Failed to load preview data.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadData();
-  }, [batchId]);
-
   // ── Polling live status ──────────────────────────────────────────────────
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -172,6 +149,55 @@ export default function PreviewPage() {
   }, [batchId]);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // ── Load preview data ────────────────────────────────────────────────────
+  useEffect(() => {
+    const loadData = async () => {
+      if (!batchId) {
+        setLoadError("No batch ID provided. Please upload an attendance sheet first.");
+        setLoading(false);
+        return;
+      }
+      try {
+        const res = await fetch(`${API_URL}/api/records/preview/${batchId}`, {
+          headers: authHeaders(),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setRecords(data.records || []);
+          setFormUrl(data.form_url || "");
+          setDebugMeta(data.debug_meta || null);
+
+          // Restore submission flow state if already running, completed, etc.
+          const statusRes = await fetch(`${API_URL}/api/automation/status/${batchId}`, {
+            headers: authHeaders(),
+          });
+          if (statusRes.ok) {
+            const statusData: BatchStatus = await statusRes.json();
+            setLiveStatus(statusData);
+            if (statusData.batch_status === "Running" || statusData.batch_status === "Paused") {
+              setFlowStatus("submitting");
+              startPolling();
+            } else if (statusData.batch_status === "Completed") {
+              setFlowStatus("completed");
+            } else if (statusData.batch_status === "Cancelled") {
+              setFlowStatus("cancelled");
+            } else if (statusData.batch_status === "Failed") {
+              setFlowStatus("failed");
+            }
+          }
+        } else {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Server returned ${res.status}`);
+        }
+      } catch (err: any) {
+        setLoadError(err?.message || "Failed to load preview data.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, [batchId, startPolling]);
 
   // ── Derived data ─────────────────────────────────────────────────────────
   const validRecords = useMemo(() => records.filter((r) => r.status !== "invalid"), [records]);
@@ -203,7 +229,10 @@ export default function PreviewPage() {
         headers: authHeaders(),
         body: JSON.stringify({ form_url: formUrl }),
       });
-      const data: ValidationReport = await res.json();
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Validation failed");
+      }
       setValidationReport(data);
       if (data.passed) setFlowStatus("validated");
     } catch (err: any) {
@@ -213,7 +242,7 @@ export default function PreviewPage() {
         fields_detected: 0,
         found: [],
         missing: [],
-        message: `Network error: ${err?.message}`,
+        message: err?.message || "Network error",
       });
     } finally {
       setValidating(false);

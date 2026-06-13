@@ -1,15 +1,13 @@
 "use client";
 
 import React from "react";
-import { useAuthStore } from "@/lib/authStore";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Menu, ShieldCheck } from "lucide-react";
+import { Sun, Moon, Menu } from "lucide-react";
 import Link from "next/link";
 
 export default function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const pathname = usePathname();
-  const { user } = useAuthStore();
   const { theme, setTheme } = useTheme();
 
   // Dynamic Breadcrumb Generator
@@ -60,14 +58,6 @@ export default function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
       </div>
 
       <div className="flex items-center gap-4 relative">
-        {/* Active Session Security Badge */}
-        <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-500 dark:text-teal-400">
-          <ShieldCheck size={13} className="shrink-0" />
-          <span className="text-[11px] font-bold tracking-tight max-w-[150px] truncate">
-            {user?.email || "Unknown"}
-          </span>
-        </div>
-
         {/* Theme Toggle */}
         <button
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -76,7 +66,6 @@ export default function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
           <Sun size={18} className="rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0 text-amber-500" />
           <Moon size={18} className="absolute rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100 text-sky-400" />
         </button>
-
       </div>
     </header>
   );

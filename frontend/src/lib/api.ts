@@ -1,18 +1,27 @@
-import { useAuthStore } from "./authStore";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export function getApiUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined") {
+    return `http://${window.location.hostname}:8000`;
+  }
+  return "http://127.0.0.1:8000";
+}
 
 interface RequestOptions extends RequestInit {
   json?: any;
 }
 
 export async function apiFetch(path: string, options: RequestOptions = {}) {
-  const { token, clearAuth } = useAuthStore.getState();
+  let session_id = "";
+  if (typeof window !== "undefined") {
+    session_id = sessionStorage.getItem("session_id") || "";
+  }
 
   const headers = new Headers(options.headers || {});
   
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  if (session_id) {
+    headers.set("X-Session-ID", session_id);
   }
 
   if (options.json && !headers.has("Content-Type")) {
@@ -20,19 +29,11 @@ export async function apiFetch(path: string, options: RequestOptions = {}) {
     options.body = JSON.stringify(options.json);
   }
 
+  const API_URL = getApiUrl();
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers,
   });
-
-  if (response.status === 401) {
-    // Session expired
-    clearAuth();
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
-    throw new Error("Unauthorized");
-  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ detail: "API Error" }));

@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { UploadCloud, FileSpreadsheet, FileDown, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+
+import { getApiUrl } from "@/lib/api";
 
 export default function UploadPage() {
   const router = useRouter();
@@ -14,6 +16,29 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [validationResults, setValidationResults] = useState<{ total: number; valid: number; issues: number } | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
+  const [activeBatch, setActiveBatch] = useState<{ id: string; form_url: string; status: string } | null>(null);
+
+  useEffect(() => {
+    async function checkActiveBatches() {
+      try {
+        const session_id = typeof window !== "undefined" ? sessionStorage.getItem("session_id") || "" : "";
+        if (!session_id) return;
+        const API_URL = getApiUrl();
+        const res = await fetch(`${API_URL}/api/records/batches`, {
+          headers: { "X-Session-ID": session_id },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.batches && data.batches.length > 0) {
+            setActiveBatch(data.batches[0]);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch batches:", e);
+      }
+    }
+    checkActiveBatches();
+  }, []);
 
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,12 +72,12 @@ export default function UploadPage() {
     formData.append("form_url", formUrl);
 
     try {
-      const { token } = (await import("@/lib/authStore")).useAuthStore.getState();
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const session_id = typeof window !== "undefined" ? sessionStorage.getItem("session_id") || "" : "";
+      const API_URL = getApiUrl();
 
       const res = await fetch(`${API_URL}/api/upload/attendance`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: session_id ? { "X-Session-ID": session_id } : {},
         body: formData,
       });
 
@@ -104,6 +129,28 @@ export default function UploadPage() {
           Upload your month's site Excel report. The parsing engine will automatically detect worker columns and apply rules.
         </p>
       </div>
+
+      {activeBatch && (
+        <div className="glass-panel p-5 border-l-4 border-l-teal-500 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in duration-300">
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400 block">
+              Active Session Upload Detected
+            </span>
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              You already have a sheet uploaded for target form:
+            </p>
+            <span className="text-xs text-slate-400 dark:text-slate-500 block truncate max-w-md">
+              {activeBatch.form_url}
+            </span>
+          </div>
+          <button
+            onClick={() => router.push(`/preview?batch_id=${activeBatch.id}`)}
+            className="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer transition-all"
+          >
+            Resume Submission & Preview
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm flex items-center gap-2">

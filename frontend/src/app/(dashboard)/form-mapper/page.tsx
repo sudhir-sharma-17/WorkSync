@@ -20,6 +20,22 @@ const systemFields = [
   { value: "description", label: "Task Description" },
 ];
 
+function getSessionId(): string {
+  if (typeof window === "undefined") return "";
+  return sessionStorage.getItem("session_id") || "";
+}
+
+function authHeaders(): Record<string, string> {
+  const session_id = getSessionId();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (session_id) {
+    headers["X-Session-ID"] = session_id;
+  }
+  return headers;
+}
+
 export default function FormMapperPage() {
   const [formUrl, setFormUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -36,10 +52,10 @@ export default function FormMapperPage() {
 
     try {
       // Try hitting the backend API scan endpoint
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
       const res = await fetch(`${API_URL}/api/form-mapper/scan`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ form_url: formUrl }),
       });
 
@@ -98,10 +114,10 @@ export default function FormMapperPage() {
     setSuccess(false);
 
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
       const res = await fetch(`${API_URL}/api/form-mapper/save`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({
           form_url: formUrl,
           mappings: mappings,

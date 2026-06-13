@@ -1,67 +1,66 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/lib/authStore";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
 import WorkSyncLogo from "@/components/layout/WorkSyncLogo";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
+
+import { getApiUrl } from "@/lib/api";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
-  const { token, user, clearAuth } = useAuthStore();
   const queryClient = useQueryClient();
   const [mounted, setMounted] = useState(false);
-  const [checking, setChecking] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      let sid = sessionStorage.getItem("session_id");
+      if (!sid) {
+        sid = "ws_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        sessionStorage.setItem("session_id", sid);
+      }
+    }
     setMounted(true);
   }, []);
 
-  useEffect(() => {
-    if (!mounted) return;
-
-    if (!token) {
-      console.log("[LAYOUT] No token detected — redirecting to /login");
-      window.location.replace("/login");
-    } else {
-      setChecking(false);
+  const handleNewSession = async () => {
+    console.log("[SESSION-RESET] Initiating session wipe...");
+    const sid = sessionStorage.getItem("session_id");
+    if (sid) {
+      const API_URL = getApiUrl();
+      try {
+        await fetch(`${API_URL}/api/records/session/reset`, {
+          method: "POST",
+          headers: {
+            "X-Session-ID": sid,
+          },
+        });
+        console.log("[SESSION-RESET] Backend session data wiped.");
+      } catch (e) {
+        console.error("[SESSION-RESET] Failed to contact backend for reset:", e);
+      }
     }
-  }, [token, mounted]);
-
-  const handleLogout = () => {
-    console.log("[MOBILE-LOGOUT] Step 1: Logout clicked");
-    clearAuth();
     try {
       queryClient.clear();
     } catch (_) {}
-    window.location.replace("/login");
+
+    // Regenerate fresh session ID
+    const newSid = "ws_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    sessionStorage.setItem("session_id", newSid);
+    console.log("[SESSION-RESET] Fresh session ID generated:", newSid);
+
+    // Hard redirect to dashboard
+    window.location.replace("/dashboard");
   };
 
   // Prevent hydration mismatches by returning null during server-side render
   if (!mounted) return null;
-
-  // Only show loader while we still have a valid session being verified
-  if (checking && token) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-100">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="animate-spin text-teal-500" size={32} />
-          <span className="text-sm font-medium text-slate-400">Verifying session...</span>
-        </div>
-      </div>
-    );
-  }
-
-  // If no token, render nothing while redirect fires
-  if (!token) return null;
 
   return (
     <div className="min-h-screen flex">
@@ -103,25 +102,25 @@ export default function DashboardLayout({
               <div className="pt-4 pb-[60px] border-t border-slate-800">
                 <div className="flex items-center gap-3 px-3 py-3 mb-4 bg-slate-950/40 rounded-xl border border-slate-800/60">
                   <div className="w-8 h-8 rounded-lg bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center font-bold text-xs shrink-0">
-                    {user?.email?.[0].toUpperCase() || "A"}
+                    S
                   </div>
                   <div className="flex flex-col min-w-0">
                     <span className="text-xs font-bold text-slate-200 truncate">
-                      {user?.email || "Admin User"}
+                      Active Session
                     </span>
                     <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wider mt-0.5">
-                      {user?.role || "Administrator"}
+                      Temporary Workspace
                     </span>
                   </div>
                 </div>
 
                 <div className="space-y-1">
                   <button
-                    onClick={handleLogout}
+                    onClick={handleNewSession}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                   >
                     <LogOut size={14} />
-                    Sign Out
+                    New Session
                   </button>
                 </div>
               </div>

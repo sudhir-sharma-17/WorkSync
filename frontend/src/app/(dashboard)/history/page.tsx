@@ -23,15 +23,23 @@ interface RecordDetail {
   error_message?: string;
 }
 
-function getToken(): string {
+function getSessionId(): string {
   if (typeof window === "undefined") return "";
-  return sessionStorage.getItem("token") || "";
+  return sessionStorage.getItem("session_id") || "";
 }
 
-function authHeaders() {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
+function authHeaders(): Record<string, string> {
+  const session_id = getSessionId();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (session_id) {
+    headers["X-Session-ID"] = session_id;
+  }
+  return headers;
 }
+
+import { getApiUrl } from "@/lib/api";
 
 export default function HistoryPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -40,7 +48,7 @@ export default function HistoryPage() {
   const [batchLogs, setBatchLogs] = useState<Record<string, RecordDetail[]>>({});
   const [loadingLogs, setLoadingLogs] = useState<Record<string, boolean>>({});
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const API_URL = getApiUrl();
 
   const fetchBatches = async () => {
     try {
