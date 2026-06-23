@@ -92,7 +92,6 @@ export default function DashboardLayout({
                   <a href="/dashboard" className="text-slate-300 hover:text-white">Dashboard</a>
                   <a href="/upload" className="text-slate-300 hover:text-white">Upload Sheets</a>
                   <a href="/form-mapper" className="text-slate-300 hover:text-white">Form Mapper</a>
-                  <a href="/history" className="text-slate-300 hover:text-white">History</a>
                   <a href="/reports" className="text-slate-300 hover:text-white">Reports</a>
                   <a href="/settings" className="text-slate-300 hover:text-white">Settings</a>
                 </nav>

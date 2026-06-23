@@ -731,7 +731,7 @@ export default function PreviewPage() {
                     )}
                     {(flowStatus === "completed" || flowStatus === "cancelled" || flowStatus === "failed") && (
                       <button
-                        onClick={() => router.push("/history")}
+                        onClick={() => router.push("/reports")}
                         className="col-span-2 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-lg"
                       >
                         View Final Report <ChevronRight size={14} />
@@ -746,8 +746,8 @@ export default function PreviewPage() {
                 <div className="flex-1 flex flex-col items-center justify-center gap-4">
                   <CheckCircle size={40} className="text-teal-500" />
                   <p className="text-sm text-slate-500">Dry run completed.</p>
-                  <button onClick={() => router.push("/history")} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded-xl cursor-pointer">
-                    View History
+                  <button onClick={() => router.push("/reports")} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded-xl cursor-pointer">
+                    View Reports
                   </button>
                 </div>
               )}

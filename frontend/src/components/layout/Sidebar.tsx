@@ -20,7 +20,6 @@ const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Upload Sheets", href: "/upload", icon: UploadCloud },
   { label: "Form Mapper", href: "/form-mapper", icon: GitCompare },
-  { label: "History", href: "/history", icon: History },
   { label: "Reports", href: "/reports", icon: FileBarChart },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
