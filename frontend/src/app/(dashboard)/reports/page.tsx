@@ -16,7 +16,8 @@ import {
   Grid,
   List,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  Trash2
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 
@@ -97,6 +98,26 @@ export default function ReportsPage() {
     a.setAttribute("href", url);
     a.setAttribute("download", `attendance_report_${batchId.substring(0, 8)}.csv`);
     a.click();
+  };
+
+  const handleDeleteBatch = async (batchId: string) => {
+    if (!confirm("Are you sure you want to delete this report log? This will delete all associated records.")) return;
+    try {
+      const data = await apiFetch(`/api/records/batches/${batchId}`, {
+        method: "DELETE"
+      });
+      if (data.status === "success") {
+        setBatches(prev => prev.filter(b => b.id !== batchId));
+        setBatchLogs(prev => {
+          const updated = { ...prev };
+          delete updated[batchId];
+          return updated;
+        });
+      }
+    } catch (e) {
+      console.error("Failed to delete batch:", e);
+      alert("Failed to delete the report log.");
+    }
   };
 
   const formatTimestamp = (isoString: string) => {
@@ -280,7 +301,7 @@ export default function ReportsPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 mt-6 pt-4 border-t border-slate-800/60">
+                <div className="flex items-center gap-2 mt-6 pt-4 border-t border-slate-800/60">
                   <button
                     onClick={() => openPreview(batch)}
                     className="flex-1 py-2 bg-slate-850 hover:bg-slate-800 text-slate-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-800"
@@ -295,6 +316,13 @@ export default function ReportsPage() {
                   >
                     <Download size={13} />
                     Download
+                  </button>
+                  <button
+                    onClick={() => handleDeleteBatch(batch.id)}
+                    className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/10 transition-colors cursor-pointer"
+                    title="Delete Log"
+                  >
+                    <Trash2 size={13} />
                   </button>
                 </div>
               </div>
@@ -355,6 +383,13 @@ export default function ReportsPage() {
                             title="Download CSV"
                           >
                             <Download size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteBatch(batch.id)}
+                            className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/10 transition-colors cursor-pointer"
+                            title="Delete Log"
+                          >
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>

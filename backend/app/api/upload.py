@@ -113,6 +113,20 @@ async def upload_attendance(
     db.add(batch)
     await db.flush()
 
+    # 3.5 Resolve project names dynamically
+    from app.services.project_resolver import ProjectResolver
+    resolver = ProjectResolver(db, session_id)
+    resolution_result = await resolver.resolve_projects(raw_records, form_url)
+    raw_records = resolution_result["resolved_records"]
+    project_resolutions = resolution_result["resolutions"]
+
+    # 3.6 Resolve worker names dynamically
+    from app.services.worker_resolver import WorkerResolver
+    worker_resolver = WorkerResolver(db, session_id)
+    worker_res_result = await worker_resolver.resolve_workers(raw_records, form_url)
+    raw_records = worker_res_result["resolved_records"]
+    worker_resolutions = worker_res_result["resolutions"]
+
     # 4. Run rules engine (validates workers / BOQ mappings)
     engine = AttendanceRulesEngine(db, session_id)
     engine_result = await engine.process_batch(raw_records)
@@ -160,7 +174,9 @@ async def upload_attendance(
     rules_debug = engine_result.get("debug", {})
     debug_meta = {
         "parser": parser_debug,
-        "rules": rules_debug
+        "rules": rules_debug,
+        "project_resolution": project_resolutions,
+        "worker_resolution": worker_resolutions
     }
     batch.debug_meta = json.dumps(debug_meta)
 

@@ -127,9 +127,23 @@ body {
   transition: all 0.2s ease;
 }
 
+.pl-10 {
+  padding-left: 2.5rem !important;
+}
+
+.glass-input option {
+  background-color: #fff;
+  color: #333;
+}
+
 .dark .glass-input {
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dark .glass-input option {
+  background-color: #0f172a;
+  color: #e2e8f0;
 }
 
 .glass-input:focus {

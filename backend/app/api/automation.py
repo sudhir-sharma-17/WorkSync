@@ -297,6 +297,10 @@ async def run_automation(
     for rec in pending:
         worker = rec.worker
         mapping = boq_map.get(worker.worker_type) if worker else None
+        
+        # Select custom override if set, otherwise fallback to mapping default
+        desc_val = rec.custom_description if rec.custom_description is not None else (mapping.description if mapping else "")
+        
         records_payload.append({
             "id": str(rec.id),
             "attendance_date": rec.attendance_date.strftime("%d/%m") if rec.attendance_date else "",
@@ -304,7 +308,7 @@ async def run_automation(
             "worker_type": worker.worker_type if worker else "",
             "project_name": rec.project_name or "",
             "boq_category": mapping.boq_category if mapping else "",
-            "description": mapping.description if mapping else "",
+            "description": desc_val,
             "duration": rec.duration or "",
         })
 

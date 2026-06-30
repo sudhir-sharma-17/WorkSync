@@ -11,6 +11,15 @@ export default function SettingsPage() {
   const [retryLimit, setRetryLimit] = useState("3");
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Project catalog refresh states
+  const [formUrlToRefresh, setFormUrlToRefresh] = useState("");
+  const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
+
+  // Worker catalog refresh states
+  const [refreshingWorkerCatalog, setRefreshingWorkerCatalog] = useState(false);
+  const [refreshWorkerSuccess, setRefreshWorkerSuccess] = useState(false);
+
   // Google account session status
   const [googleStatus, setGoogleStatus] = useState<{ connected: boolean; email: string | null; connecting?: boolean }>({
     connected: false,
@@ -84,6 +93,48 @@ export default function SettingsPage() {
     setTimeout(() => setSaveSuccess(false), 2000);
   };
 
+  const handleRefreshCatalog = async () => {
+    if (!formUrlToRefresh) return;
+    setRefreshingCatalog(true);
+    setRefreshSuccess(false);
+    try {
+      const data = await apiFetch("/api/records/project-catalog/refresh", {
+        method: "POST",
+        json: { form_url: formUrlToRefresh }
+      });
+      if (data.status === "success") {
+        setRefreshSuccess(true);
+        setTimeout(() => setRefreshSuccess(false), 5000);
+      }
+    } catch (e) {
+      console.error("Failed to refresh catalog:", e);
+      alert(e instanceof Error ? e.message : "Failed to refresh project catalog");
+    } finally {
+      setRefreshingCatalog(false);
+    }
+  };
+
+  const handleRefreshWorkerCatalog = async () => {
+    if (!formUrlToRefresh) return;
+    setRefreshingWorkerCatalog(true);
+    setRefreshWorkerSuccess(false);
+    try {
+      const data = await apiFetch("/api/records/worker-catalog/refresh", {
+        method: "POST",
+        json: { form_url: formUrlToRefresh }
+      });
+      if (data.status === "success") {
+        setRefreshWorkerSuccess(true);
+        setTimeout(() => setRefreshWorkerSuccess(false), 5000);
+      }
+    } catch (e) {
+      console.error("Failed to refresh worker catalog:", e);
+      alert(e instanceof Error ? e.message : "Failed to refresh worker catalog");
+    } finally {
+      setRefreshingWorkerCatalog(false);
+    }
+  };
+
   return (
     <div className="space-y-8 relative z-10 max-w-4xl mx-auto">
       <div>
@@ -155,6 +206,81 @@ export default function SettingsPage() {
           <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">
             Note: Google authentication is completely temporary and session-based. Closing the WorkSync window or starting a New Session will automatically wipe all credentials, cookies, and active connection contexts.
           </p>
+        </div>
+
+        {/* Project Catalog Caching Management */}
+        <div className="glass-panel p-6 space-y-6">
+          <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+            <Cpu className="text-teal-600 dark:text-teal-400" size={18} />
+            Project Catalog Cache Manager
+          </h3>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                Google Form URL
+              </label>
+              <input
+                type="url"
+                required
+                placeholder="https://docs.google.com/forms/d/e/.../viewform"
+                className="w-full glass-input text-sm"
+                value={formUrlToRefresh}
+                onChange={(e) => setFormUrlToRefresh(e.target.value)}
+                disabled={refreshingCatalog || refreshingWorkerCatalog}
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2">
+              <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed max-w-md">
+                Refreshes the cached project dropdown list directly from the live Google Form dropdown. Use this when new project options are added to the form.
+              </p>
+              <button
+                type="button"
+                onClick={handleRefreshCatalog}
+                disabled={refreshingCatalog || !formUrlToRefresh || refreshingWorkerCatalog}
+                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl shadow-md shadow-teal-950/10 cursor-pointer transition-all disabled:opacity-50 flex items-center gap-2 shrink-0 self-end sm:self-auto"
+              >
+                {refreshingCatalog ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                {refreshingCatalog ? "Refreshing Catalog..." : "Refresh Project Catalog"}
+              </button>
+            </div>
+            {refreshSuccess && (
+              <p className="text-xs text-emerald-400 font-bold flex items-center gap-1">
+                <Check size={14} /> Project catalog successfully refreshed and cached!
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Worker Catalog Caching Management */}
+        <div className="glass-panel p-6 space-y-6">
+          <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+            <Cpu className="text-teal-600 dark:text-teal-400" size={18} />
+            Worker Catalog Cache Manager
+          </h3>
+
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2">
+              <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed max-w-md">
+                Refreshes the cached worker dropdown list directly from the live Google Form dropdown. Use this when new worker options are added to the form.
+              </p>
+              <button
+                type="button"
+                onClick={handleRefreshWorkerCatalog}
+                disabled={refreshingWorkerCatalog || !formUrlToRefresh || refreshingCatalog}
+                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl shadow-md shadow-teal-950/10 cursor-pointer transition-all disabled:opacity-50 flex items-center gap-2 shrink-0 self-end sm:self-auto"
+              >
+                {refreshingWorkerCatalog ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                {refreshingWorkerCatalog ? "Refreshing Catalog..." : "Refresh Worker Catalog"}
+              </button>
+            </div>
+            {refreshWorkerSuccess && (
+              <p className="text-xs text-emerald-400 font-bold flex items-center gap-1">
+                <Check size={14} /> Worker catalog successfully refreshed and cached!
+              </p>
+            )}
+          </div>
         </div>
 
         <form onSubmit={handleSave} className="space-y-6">

@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+backend/playwright_sessions/
+
+
+# Python virtual environment
+myenv/
+venv/
+.venv/
+
+# Playwright session data
+backend/playwright_sessions/
+
+# Python cache
+__pycache__/
+*.pyc

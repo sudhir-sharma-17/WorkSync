@@ -17,6 +17,8 @@ export default function DashboardLayout({
   const queryClient = useQueryClient();
   const [mounted, setMounted] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(256);
+  const [isResizing, setIsResizing] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -25,9 +27,43 @@ export default function DashboardLayout({
         sid = "ws_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
         sessionStorage.setItem("session_id", sid);
       }
+
+      const savedWidth = localStorage.getItem("sidebarWidth");
+      if (savedWidth) {
+        const w = parseInt(savedWidth, 10);
+        if (w >= 160 && w <= 480) {
+          setSidebarWidth(w);
+        }
+      }
     }
     setMounted(true);
   }, []);
+
+  const startResizing = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = e.clientX;
+      if (newWidth >= 160 && newWidth <= 480) {
+        setSidebarWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      localStorage.setItem("sidebarWidth", sidebarWidth.toString());
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing, sidebarWidth]);
 
   const handleNewSession = async () => {
     console.log("[SESSION-RESET] Initiating session wipe...");
@@ -63,12 +99,12 @@ export default function DashboardLayout({
   if (!mounted) return null;
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex" style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       {/* Sidebar - Desktop */}
-      <Sidebar />
+      <Sidebar width={sidebarWidth} onResizeStart={startResizing} />
 
       {/* Main Content Pane */}
-      <div className="flex-1 md:pl-64 flex flex-col min-h-screen relative">
+      <div className="flex-1 md:pl-[var(--sidebar-width)] flex flex-col min-h-screen relative">
         <Topbar onMenuClick={() => setMobileSidebarOpen(!mobileSidebarOpen)} />
         
         {/* Mobile Sidebar overlay */}

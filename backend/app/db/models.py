@@ -112,6 +112,7 @@ class AttendanceRecord(Base):
     attendance_date = Column(Date, nullable=False, index=True)
     duration = Column(String, nullable=False)
     status = Column(String, default="Pending")
+    custom_description = Column(String, nullable=True)
 
     batch = relationship("UploadBatch", back_populates="attendance_records")
     worker = relationship("Worker", back_populates="attendance_records")
@@ -134,3 +135,23 @@ class SubmissionResult(Base):
     form_url = Column(String, nullable=False)
 
     record = relationship("AttendanceRecord", back_populates="submission_result")
+
+
+class ProjectAlias(Base):
+    __tablename__ = "project_aliases"
+
+    id = Column(String, primary_key=True, default=new_uuid)
+    input_project = Column(String, nullable=False, unique=True)
+    resolved_project = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WorkerAlias(Base):
+    __tablename__ = "worker_aliases"
+
+    id = Column(String, primary_key=True, default=new_uuid)
+    input_worker = Column(String, nullable=False, unique=True)
+    resolved_worker = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+

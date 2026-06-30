@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Zap,
+  GitCompare,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -124,6 +125,14 @@ export default function PreviewPage() {
   // Edit modal
   const [editingRecord, setEditingRecord] = useState<PreviewRecord | null>(null);
 
+  // Project resolution states
+  const [resolutionSummaryOpen, setResolutionSummaryOpen] = useState(true);
+  const [projectCatalog, setProjectCatalog] = useState<string[]>([]);
+
+  // Worker resolution states
+  const [workerResolutionSummaryOpen, setWorkerResolutionSummaryOpen] = useState(true);
+  const [workerCatalog, setWorkerCatalog] = useState<string[]>([]);
+
   // ── Polling live status ──────────────────────────────────────────────────
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -167,6 +176,35 @@ export default function PreviewPage() {
           setRecords(data.records || []);
           setFormUrl(data.form_url || "");
           setDebugMeta(data.debug_meta || null);
+
+          // Fetch project catalog
+          try {
+            const catalogRes = await fetch(`${API_URL}/api/records/project-catalog/${batchId}`, {
+              headers: sessionHeaders(),
+            });
+            if (catalogRes.ok) {
+              const catalogData = await catalogRes.json();
+              const rawCatalog = catalogData.catalog || [];
+              const durationPatterns = [/^\d+-\d+\s*hours?$/i, /^ot\s*\(/i];
+              const filtered = rawCatalog.filter((p: string) => !durationPatterns.some((pat) => pat.test(p)));
+              setProjectCatalog(filtered);
+            }
+          } catch (e) {
+            console.error("Failed to load project catalog:", e);
+          }
+
+          // Fetch worker catalog
+          try {
+            const wCatalogRes = await fetch(`${API_URL}/api/records/worker-catalog/${batchId}`, {
+              headers: sessionHeaders(),
+            });
+            if (wCatalogRes.ok) {
+              const wCatalogData = await wCatalogRes.json();
+              setWorkerCatalog(wCatalogData.catalog || []);
+            }
+          } catch (e) {
+            console.error("Failed to load worker catalog:", e);
+          }
 
           // Restore submission flow state if already running, completed, etc.
           const statusRes = await fetch(`${API_URL}/api/automation/status/${batchId}`, {
@@ -216,6 +254,16 @@ export default function PreviewPage() {
     (currentPage - 1) * recordsPerPage,
     currentPage * recordsPerPage
   );
+
+  const durationOptions = [
+    "0-2 hours",
+    "2-4 hours",
+    "4-6 hours",
+    "6-8 hours",
+    "8-10 hours",
+    "OT (2 Hours)",
+    "OT (4 Hours)"
+  ];
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -284,11 +332,81 @@ export default function PreviewPage() {
     setFlowStatus("cancelled");
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (editingRecord) {
-      setRecords(records.map((r) => (r.id === editingRecord.id ? editingRecord : r)));
-      setEditingRecord(null);
+      try {
+        const res = await fetch(`${API_URL}/api/records/attendance/${editingRecord.id}`, {
+          method: "PUT",
+          headers: sessionHeaders(),
+          body: JSON.stringify({
+            project_name: editingRecord.project_name,
+            worker_name: editingRecord.worker_name,
+            description: editingRecord.description,
+            duration: editingRecord.duration
+          })
+        });
+        if (res.ok) {
+          setRecords(records.map((r) => (r.id === editingRecord.id ? editingRecord : r)));
+          setEditingRecord(null);
+        }
+      } catch (err) {
+        console.error("Error saving record edit:", err);
+      }
+    }
+  };
+
+  const handleAliasMappingCorrection = async (inputProject: string, resolvedProject: string) => {
+    if (!resolvedProject) return;
+    try {
+      const res = await fetch(`${API_URL}/api/records/project-alias`, {
+        method: "POST",
+        headers: sessionHeaders(),
+        body: JSON.stringify({
+          batch_id: batchId,
+          input_project: inputProject,
+          resolved_project: resolvedProject
+        })
+      });
+      if (res.ok) {
+        const refreshRes = await fetch(`${API_URL}/api/records/preview/${batchId}`, {
+          headers: sessionHeaders(),
+        });
+        if (refreshRes.ok) {
+          const data = await refreshRes.json();
+          setRecords(data.records || []);
+          setDebugMeta(data.debug_meta || null);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to save project alias:", e);
+    }
+  };
+
+  const handleWorkerAliasMappingCorrection = async (inputWorker: string, resolvedWorker: string) => {
+    if (!resolvedWorker) return;
+    try {
+      const res = await fetch(`${API_URL}/api/records/worker-alias`, {
+        method: "POST",
+        headers: sessionHeaders(),
+        body: JSON.stringify({
+          batch_id: batchId,
+          input_worker: inputWorker,
+          resolved_worker: resolvedWorker
+        })
+      });
+      if (res.ok) {
+        const refreshRes = await fetch(`${API_URL}/api/records/preview/${batchId}`, {
+          headers: sessionHeaders(),
+        });
+        if (refreshRes.ok) {
+          const data = await refreshRes.json();
+          setRecords(data.records || []);
+          setDebugMeta(data.debug_meta || null);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to save worker alias:", e);
     }
   };
 
@@ -511,6 +629,135 @@ export default function PreviewPage() {
             </div>
           )}
 
+          {/* Project Resolution Summary */}
+          {debugMeta?.project_resolution && debugMeta.project_resolution.length > 0 && (
+            <div className="glass-panel p-6 space-y-4 bg-slate-900/40 border-slate-800 shadow-lg transition-all duration-300">
+              <div className="flex justify-between items-center cursor-pointer" onClick={() => setResolutionSummaryOpen(!resolutionSummaryOpen)}>
+                <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                  <GitCompare size={18} className="text-teal-400" />
+                  Project Resolution Summary
+                </h3>
+                <span className="text-xs text-slate-500 hover:text-slate-350 transition-colors">
+                  {resolutionSummaryOpen ? "Collapse [-]" : "Expand [+]"}
+                </span>
+              </div>
+              
+              {resolutionSummaryOpen && (
+                <div className="overflow-x-auto pt-2 animate-in fade-in duration-200">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-850 text-slate-400 font-semibold uppercase tracking-wider pb-2">
+                        <th className="py-2.5 px-4">Input Project</th>
+                        <th className="py-2.5 px-4">Resolved Project</th>
+                        <th className="py-2.5 px-4">Confidence</th>
+                        <th className="py-2.5 px-4">Match Method</th>
+                        <th className="py-2.5 px-4">Status</th>
+                        <th className="py-2.5 px-4 text-right">Correct Mappings</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-850">
+                      {debugMeta.project_resolution.map((res: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-900/20 transition-colors">
+                           <td className="py-3 px-4 font-semibold text-slate-300">{res.input_project}</td>
+                          <td className="py-3 px-4 text-slate-400 font-medium">{res.resolved_project}</td>
+                          <td className="py-3 px-4 font-mono font-bold text-teal-400">{res.confidence}%</td>
+                          <td className="py-3 px-4 text-slate-500 italic">{res.match_type}</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              res.status === "Auto-Accepted" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/10" :
+                              res.status === "Smart Match" ? "bg-blue-500/10 text-blue-400 border border-blue-500/10" :
+                              "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                            }`}>
+                              {res.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <select
+                              className="glass-input text-[11px] py-1.5 px-2.5 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer max-w-[200px] text-slate-200 focus:outline-none focus:border-teal-500 bg-[#0f172a]"
+                              value={res.resolved_project}
+                              onChange={(e) => handleAliasMappingCorrection(res.input_project, e.target.value)}
+                            >
+                              <option value="" className="bg-[#0f172a] text-slate-200">-- Correct Mapping --</option>
+                              {projectCatalog.map((p) => (
+                                <option key={p} value={p} className="bg-[#0f172a] text-slate-200">{p}</option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Worker Resolution Summary */}
+          {debugMeta?.worker_resolution && debugMeta.worker_resolution.length > 0 && (
+            <div className="glass-panel p-6 space-y-4 bg-slate-900/40 border-slate-800 shadow-lg transition-all duration-300">
+              <div className="flex justify-between items-center cursor-pointer" onClick={() => setWorkerResolutionSummaryOpen(!workerResolutionSummaryOpen)}>
+                <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                  <GitCompare size={18} className="text-teal-400" />
+                  Worker Resolution Summary
+                </h3>
+                <span className="text-xs text-slate-500 hover:text-slate-350 transition-colors">
+                  {workerResolutionSummaryOpen ? "Collapse [-]" : "Expand [+]"}
+                </span>
+              </div>
+              
+              {workerResolutionSummaryOpen && (
+                <div className="overflow-x-auto pt-2 animate-in fade-in duration-200">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-850 text-slate-400 font-semibold uppercase tracking-wider pb-2">
+                        <th className="py-2.5 px-4">Input Worker</th>
+                        <th className="py-2.5 px-4">Resolved Worker</th>
+                        <th className="py-2.5 px-4">Confidence</th>
+                        <th className="py-2.5 px-4">Match Method</th>
+                        <th className="py-2.5 px-4">Status</th>
+                        <th className="py-2.5 px-4 text-right">Correct Mappings</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-850">
+                      {debugMeta.worker_resolution.map((res: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-900/20 transition-colors">
+                          <td className="py-3 px-4 font-semibold text-slate-300">{res.input_worker}</td>
+                          <td className="py-3 px-4 text-slate-400 font-medium">{res.resolved_worker}</td>
+                          <td className="py-3 px-4 font-mono font-bold text-teal-400">{res.confidence}%</td>
+                          <td className="py-3 px-4 text-slate-500 italic">{res.match_type}</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              res.status === "Auto-Accepted" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/10" :
+                              res.status === "Smart Match" ? "bg-blue-500/10 text-blue-400 border border-blue-500/10" :
+                              "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                            }`}>
+                              {res.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <select
+                              className="glass-input text-[11px] py-1.5 px-2.5 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer max-w-[200px] text-slate-200 focus:outline-none focus:border-teal-500 w-full bg-[#0f172a]"
+                              value={workerCatalog.includes(res.resolved_worker) ? res.resolved_worker : ""}
+                              onChange={(e) => handleWorkerAliasMappingCorrection(res.input_worker, e.target.value)}
+                            >
+                              <option value="" className="bg-[#0f172a] text-slate-200">-- Correct Mapping --</option>
+                              {workerCatalog.map((w) => (
+                                <option key={w} value={w} className="bg-[#0f172a] text-slate-200">{w}</option>
+                              ))}
+                              {res.resolved_worker && !workerCatalog.includes(res.resolved_worker) && res.resolved_worker !== "Needs Review" && (
+                                <option value={res.resolved_worker} className="bg-[#0f172a] text-slate-200">{res.resolved_worker}</option>
+                              )}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
             {/* ── Left: Records Table ─────────────────────────────── */}
             <div className="xl:col-span-3 glass-panel p-6 flex flex-col min-h-[500px]">
@@ -522,7 +769,7 @@ export default function PreviewPage() {
                   <input
                     type="text"
                     placeholder="Search by worker or project..."
-                    className="w-full pl-9 pr-4 py-2 glass-input text-sm"
+                    className="w-full pl-10 pr-4 py-2 glass-input text-sm"
                     value={searchQuery}
                     onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
                   />
@@ -530,14 +777,14 @@ export default function PreviewPage() {
                 <div className="relative w-full sm:w-48">
                   <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                   <select
-                    className="w-full pl-9 pr-4 py-2 glass-input text-sm appearance-none bg-transparent cursor-pointer"
+                    className="w-full pl-10 pr-4 py-2 glass-input text-sm appearance-none bg-[#0f172a] text-slate-200 cursor-pointer"
                     value={filterStatus}
                     onChange={(e) => { setFilterStatus(e.target.value); setCurrentPage(1); }}
                   >
-                    <option value="all" className="bg-slate-900">All Statuses</option>
-                    <option value="valid" className="bg-slate-900">Valid Only</option>
-                    <option value="warning" className="bg-slate-900">Warnings</option>
-                    <option value="invalid" className="bg-slate-900">Invalid / Errors</option>
+                    <option value="all" className="bg-[#0f172a] text-slate-200">All Statuses</option>
+                    <option value="valid" className="bg-[#0f172a] text-slate-200">Valid Only</option>
+                    <option value="warning" className="bg-[#0f172a] text-slate-200">Warnings</option>
+                    <option value="invalid" className="bg-[#0f172a] text-slate-200">Invalid / Errors</option>
                   </select>
                 </div>
                 <button
@@ -767,23 +1014,64 @@ export default function PreviewPage() {
             <form onSubmit={handleSaveEdit} className="space-y-4">
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">Worker Name</label>
-                <input
-                  type="text"
+                <select
                   value={editingRecord.worker_name}
                   onChange={(e) => setEditingRecord({ ...editingRecord, worker_name: e.target.value })}
-                  className="w-full glass-input text-sm"
+                  className="w-full glass-input text-sm bg-[#0f172a] border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer text-slate-200"
                   required
-                />
+                >
+                  <option value="" className="bg-[#0f172a] text-slate-200">-- Select Worker --</option>
+                  {projectCatalog.map((p) => (
+                    <option key={p} value={p} className="bg-[#0f172a] text-slate-200">{p}</option>
+                  ))}
+                  {editingRecord.worker_name && !projectCatalog.includes(editingRecord.worker_name) && (
+                    <option value={editingRecord.worker_name} className="bg-[#0f172a] text-slate-200">{editingRecord.worker_name}</option>
+                  )}
+                </select>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">Project Name</label>
-                <input
-                  type="text"
+                <select
                   value={editingRecord.project_name}
                   onChange={(e) => setEditingRecord({ ...editingRecord, project_name: e.target.value })}
-                  className="w-full glass-input text-sm"
+                  className="w-full glass-input text-sm bg-[#0f172a] border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer text-slate-200"
                   required
+                >
+                  <option value="" className="bg-[#0f172a] text-slate-200">-- Select Project --</option>
+                  {projectCatalog.map((p) => (
+                    <option key={p} value={p} className="bg-[#0f172a] text-slate-200">{p}</option>
+                  ))}
+                  {editingRecord.project_name && !projectCatalog.includes(editingRecord.project_name) && (
+                    <option value={editingRecord.project_name} className="bg-[#0f172a] text-slate-200">{editingRecord.project_name}</option>
+                  )}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">Description</label>
+                <input
+                  type="text"
+                  value={editingRecord.description || ""}
+                  onChange={(e) => setEditingRecord({ ...editingRecord, description: e.target.value })}
+                  className="w-full glass-input text-sm"
                 />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">Duration</label>
+                <select
+                  value={
+                    durationOptions.find((opt) => opt.toLowerCase() === (editingRecord.duration || "").toLowerCase()) ||
+                    editingRecord.duration ||
+                    ""
+                  }
+                  onChange={(e) => setEditingRecord({ ...editingRecord, duration: e.target.value })}
+                  className="w-full glass-input text-sm bg-[#0f172a] border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer text-slate-200"
+                  required
+                >
+                  <option value="" className="bg-[#0f172a] text-slate-200">-- Select Duration --</option>
+                  {durationOptions.map((opt) => (
+                    <option key={opt} value={opt} className="bg-[#0f172a] text-slate-200">{opt}</option>
+                  ))}
+                </select>
               </div>
               <div className="pt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setEditingRecord(null)} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer">

@@ -68,6 +68,9 @@ async def get_preview(
         else:
             ui_status = "valid"  # Pending → valid (not yet submitted)
 
+        # Determine Description (use record custom override if present, otherwise default to role mapping description)
+        desc_val = rec.custom_description if rec.custom_description is not None else (mapping.description if mapping else "")
+
         preview_records.append({
             "id": rec.id,
             "attendance_date": rec.attendance_date.strftime("%d/%m") if rec.attendance_date else "",
@@ -75,7 +78,7 @@ async def get_preview(
             "worker_type": worker.worker_type if worker else "",
             "project_name": rec.project_name,
             "boq_category": mapping.boq_category if mapping else "",
-            "description": mapping.description if mapping else "",
+            "description": desc_val,
             "duration": rec.duration,
             "status": ui_status,
             "error_message": None,
@@ -174,3 +177,290 @@ async def reset_session(
                 pass
 
     return {"message": "Session wiped successfully."}
+
+
+from pydantic import BaseModel
+from typing import Optional
+
+class UpdateRecordRequest(BaseModel):
+    project_name: str
+    worker_name: str
+    description: Optional[str] = None
+    duration: Optional[str] = None
+
+class ProjectAliasRequest(BaseModel):
+    batch_id: str
+    input_project: str
+    resolved_project: str
+
+class WorkerAliasRequest(BaseModel):
+    batch_id: str
+    input_worker: str
+    resolved_worker: str
+
+class RefreshCatalogRequest(BaseModel):
+    form_url: str
+
+
+@router.put("/attendance/{record_id}")
+async def update_attendance_record(
+    record_id: str,
+    req: UpdateRecordRequest,
+    db: AsyncSession = Depends(get_db),
+    session_id: str = Depends(get_session_id),
+):
+    """Updates a single attendance record's project, worker name, custom description, and duration."""
+    res = await db.execute(
+        select(AttendanceRecord)
+        .options(selectinload(AttendanceRecord.worker))
+        .where(AttendanceRecord.id == record_id, AttendanceRecord.session_id == session_id)
+    )
+    rec = res.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found.")
+
+    rec.project_name = req.project_name
+    if rec.worker:
+        rec.worker.name = req.worker_name
+        
+    # Store description directly on this specific record
+    rec.custom_description = req.description
+
+    if req.duration is not None:
+        rec.duration = req.duration
+
+    await db.commit()
+    return {"status": "success", "message": "Record updated successfully."}
+
+
+@router.post("/project-alias")
+async def save_project_alias(
+    req: ProjectAliasRequest,
+    db: AsyncSession = Depends(get_db),
+    session_id: str = Depends(get_session_id),
+):
+    """Saves a global project alias mapping and bulk-updates all records in the batch with matching input project name."""
+    from app.db.models import ProjectAlias
+    
+    # 1. Upsert global alias dictionary
+    res_alias = await db.execute(select(ProjectAlias).where(ProjectAlias.input_project == req.input_project))
+    alias = res_alias.scalar_one_or_none()
+    if not alias:
+        alias = ProjectAlias(
+            input_project=req.input_project,
+            resolved_project=req.resolved_project
+        )
+        db.add(alias)
+    else:
+        alias.resolved_project = req.resolved_project
+
+    # 2. Get batch to read debug_meta and find previous resolved project name
+    batch_res = await db.execute(select(UploadBatch).where(UploadBatch.id == req.batch_id, UploadBatch.session_id == session_id))
+    batch = batch_res.scalar_one_or_none()
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+    prev_resolved = req.input_project
+    resolutions = []
+    if batch.debug_meta:
+        try:
+            debug_data = json.loads(batch.debug_meta)
+            resolutions = debug_data.get("project_resolution", [])
+            for r in resolutions:
+                if r.get("input_project") == req.input_project:
+                    prev_resolved = r.get("resolved_project")
+                    r["resolved_project"] = req.resolved_project
+                    r["confidence"] = 100
+                    r["status"] = "Auto-Accepted"
+                    r["match_type"] = "Manual Correction"
+            batch.debug_meta = json.dumps(debug_data)
+        except Exception:
+            pass
+
+    # 3. Bulk update all records in the batch having either input_project or prev_resolved as project_name
+    from sqlalchemy import update
+    stmt = (
+        update(AttendanceRecord)
+        .where(
+            AttendanceRecord.batch_id == req.batch_id,
+            AttendanceRecord.session_id == session_id,
+            AttendanceRecord.project_name.in_([req.input_project, prev_resolved])
+        )
+        .values(project_name=req.resolved_project)
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+    return {"status": "success", "message": f"Global alias saved. Bulk updated batch records to {req.resolved_project}."}
+
+
+@router.post("/worker-alias")
+async def save_worker_alias(
+    req: WorkerAliasRequest,
+    db: AsyncSession = Depends(get_db),
+    session_id: str = Depends(get_session_id),
+):
+    """Saves a global worker alias mapping and bulk-updates all records in the batch with matching input worker name."""
+    from app.db.models import WorkerAlias, Worker
+    
+    # 1. Upsert global alias dictionary
+    res_alias = await db.execute(select(WorkerAlias).where(WorkerAlias.input_worker == req.input_worker))
+    alias = res_alias.scalar_one_or_none()
+    if not alias:
+        alias = WorkerAlias(
+            input_worker=req.input_worker,
+            resolved_worker=req.resolved_worker
+        )
+        db.add(alias)
+    else:
+        alias.resolved_worker = req.resolved_worker
+
+    # 2. Get batch to read debug_meta and find previous resolved worker name
+    batch_res = await db.execute(select(UploadBatch).where(UploadBatch.id == req.batch_id, UploadBatch.session_id == session_id))
+    batch = batch_res.scalar_one_or_none()
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+    prev_resolved = req.input_worker
+    resolutions = []
+    if batch.debug_meta:
+        try:
+            debug_data = json.loads(batch.debug_meta)
+            resolutions = debug_data.get("worker_resolution", [])
+            for r in resolutions:
+                if r.get("input_worker") == req.input_worker:
+                    prev_resolved = r.get("resolved_worker")
+                    r["resolved_worker"] = req.resolved_worker
+                    r["confidence"] = 100
+                    r["status"] = "Auto-Accepted"
+                    r["match_type"] = "Manual Correction"
+            batch.debug_meta = json.dumps(debug_data)
+        except Exception:
+            pass
+
+    # 3. Bulk update all workers in this session having either input_worker or prev_resolved as name
+    # First, find all workers that need updating
+    from sqlalchemy import update
+    workers_stmt = select(Worker).where(
+        Worker.session_id == session_id,
+        Worker.name.in_([req.input_worker, prev_resolved])
+    )
+    res_workers = await db.execute(workers_stmt)
+    workers_to_update = res_workers.scalars().all()
+    for worker in workers_to_update:
+        worker.name = req.resolved_worker
+        # Try inferring worker type from new resolved name
+        if "_" in req.resolved_worker:
+            worker.worker_type = req.resolved_worker.split("_")[0]
+        elif " " in req.resolved_worker:
+            # e.g., CARPENTER NARESH -> CARPENTER
+            worker.worker_type = req.resolved_worker.split(" ")[0]
+
+    await db.commit()
+
+    return {"status": "success", "message": f"Global worker alias saved. Bulk updated batch workers to {req.resolved_worker}."}
+
+
+@router.get("/project-catalog/{batch_id}")
+async def get_batch_project_catalog(
+    batch_id: str,
+    db: AsyncSession = Depends(get_db),
+    session_id: str = Depends(get_session_id),
+):
+    """Fetches cached or scraped project names catalog associated with the batch's form URL."""
+    batch_res = await db.execute(select(UploadBatch).where(UploadBatch.id == batch_id, UploadBatch.session_id == session_id))
+    batch = batch_res.scalar_one_or_none()
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+    from app.services.project_resolver import ProjectResolver
+    resolver = ProjectResolver(db, session_id)
+    catalog = await resolver.get_project_catalog(batch.form_url)
+    return {"catalog": catalog}
+
+
+@router.get("/worker-catalog/{batch_id}")
+async def get_batch_worker_catalog(
+    batch_id: str,
+    db: AsyncSession = Depends(get_db),
+    session_id: str = Depends(get_session_id),
+):
+    """Fetches cached or scraped worker names catalog associated with the batch's form URL."""
+    batch_res = await db.execute(select(UploadBatch).where(UploadBatch.id == batch_id, UploadBatch.session_id == session_id))
+    batch = batch_res.scalar_one_or_none()
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+    from app.services.worker_resolver import WorkerResolver
+    resolver = WorkerResolver(db, session_id)
+    catalog = await resolver.get_worker_catalog(batch.form_url)
+    return {"catalog": catalog}
+
+
+@router.delete("/batches/{batch_id}")
+async def delete_upload_batch(
+    batch_id: str,
+    db: AsyncSession = Depends(get_db),
+    session_id: str = Depends(get_session_id),
+):
+    """Deletes a specific upload batch and its associated attendance records and submission results."""
+    from app.db.models import SubmissionResult, AttendanceRecord, UploadBatch
+    
+    # 1. Fetch batch to verify ownership
+    batch_res = await db.execute(
+        select(UploadBatch).where(UploadBatch.id == batch_id, UploadBatch.session_id == session_id)
+    )
+    batch = batch_res.scalar_one_or_none()
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+        
+    # 2. Delete related submission results and records
+    records_res = await db.execute(
+        select(AttendanceRecord.id).where(AttendanceRecord.batch_id == batch_id)
+    )
+    record_ids = [str(rid) for rid in records_res.scalars().all()]
+    
+    if record_ids:
+        await db.execute(
+            delete(SubmissionResult).where(SubmissionResult.record_id.in_(record_ids))
+        )
+        await db.execute(
+            delete(AttendanceRecord).where(AttendanceRecord.id.in_(record_ids))
+        )
+        
+    # 3. Delete the batch itself
+    await db.execute(
+        delete(UploadBatch).where(UploadBatch.id == batch_id)
+    )
+    
+    await db.commit()
+    return {"status": "success", "message": f"Batch {batch_id} deleted successfully."}
+
+
+@router.post("/project-catalog/refresh")
+async def refresh_project_catalog(
+    req: RefreshCatalogRequest,
+    db: AsyncSession = Depends(get_db),
+    session_id: str = Depends(get_session_id),
+):
+    """Forces Playwright scrape to update the cached project catalog for the given Google Form URL."""
+    from app.services.project_resolver import ProjectResolver
+    resolver = ProjectResolver(db, session_id)
+    catalog = await resolver.get_project_catalog(req.form_url, force_refresh=True)
+    return {"catalog": catalog, "status": "success"}
+
+
+@router.post("/worker-catalog/refresh")
+async def refresh_worker_catalog(
+    req: RefreshCatalogRequest,
+    db: AsyncSession = Depends(get_db),
+    session_id: str = Depends(get_session_id),
+):
+    """Forces Playwright scrape to update the cached worker catalog for the given Google Form URL."""
+    from app.services.worker_resolver import WorkerResolver
+    resolver = WorkerResolver(db, session_id)
+    catalog = await resolver.get_worker_catalog(req.form_url, force_refresh=True)
+    return {"catalog": catalog, "status": "success"}
+
+
+

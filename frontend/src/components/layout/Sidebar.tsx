@@ -24,7 +24,7 @@ const navItems = [
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ width, onResizeStart }: { width: number; onResizeStart: (e: React.MouseEvent) => void }) {
   const pathname = usePathname();
   const queryClient = useQueryClient();
 
@@ -57,7 +57,15 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 md:flex flex-col border-r border-slate-200/50 dark:border-slate-800/40 bg-white/40 dark:bg-slate-950/40 backdrop-blur-xl transition-all duration-300">
+    <aside 
+      className="fixed inset-y-0 left-0 z-20 hidden md:flex flex-col border-r border-slate-200/50 dark:border-slate-800/40 bg-white/40 dark:bg-slate-950/40 backdrop-blur-xl"
+      style={{ width: `${width}px` }}
+    >
+      {/* Resize Handle */}
+      <div
+        onMouseDown={onResizeStart}
+        className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 transition-colors z-30"
+      />
       <div className="flex h-16 items-center px-6 gap-2.5 border-b border-slate-200/50 dark:border-slate-800/40">
         <WorkSyncLogo className="w-8 h-8" />
         <span className="font-bold text-slate-800 dark:text-slate-100 tracking-tight">WorkSync</span>
