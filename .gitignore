@@ -1,0 +1,14 @@
+myenv/
+venv/
+.venv/
+node_modules/
+.next/
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/playwright_sessions/
+backend/playwright_user_data/
+backend/reports/
