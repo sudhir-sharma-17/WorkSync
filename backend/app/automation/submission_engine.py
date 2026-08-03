@@ -434,14 +434,18 @@ class PlaywrightSubmissionEngine:
                                             aria = await inp.get_attribute("aria-label") or ""
                                             if "Day" in aria or "day" in aria:
                                                 await inp.fill(dd)
+                                                await inp.blur()
                                             elif "Month" in aria or "month" in aria:
                                                 await inp.fill(mm)
+                                                await inp.blur()
                                             elif "Year" in aria and len(parts) >= 3:
                                                 await inp.fill(parts[2])
+                                                await inp.blur()
                                         continue
 
                             input_el = container.locator('input[type="text"], input:not([type="hidden"]), textarea').first
                             await input_el.fill(str(value))
+                            await input_el.blur()
 
                         elif input_type == "radio":
                             option = container.locator(f'[data-value="{value}"], div[role="radio"]').filter(has_text=str(value)).first
@@ -455,13 +459,28 @@ class PlaywrightSubmissionEngine:
                     submit_btn = page.locator(
                         'div[role="button"]:has-text("Submit"), '
                         'button:has-text("Submit")'
-                    )
-                    await submit_btn.first.click()
+                    ).first
+                    
+                    # Wait up to 2 seconds for the submit button to become enabled in the DOM
+                    for _ in range(10):
+                        aria_disabled = await submit_btn.get_attribute("aria-disabled")
+                        if aria_disabled != "true":
+                            break
+                        await page.wait_for_timeout(200)
+
+                    await submit_btn.click()
                     
                     try:
-                        await page.wait_for_selector(
-                            '.freebirdFormviewerViewResponseConfirmationMessage, .vHW8K',
-                            timeout=5000,
+                        # Wait up to 10 seconds for any confirmation condition to match:
+                        # 1. URL contains 'formResponse'
+                        # 2. Confirmation CSS selectors appear
+                        # 3. Success text appears on the page
+                        await page.wait_for_function(
+                            "() => window.location.href.includes('formResponse') || "
+                            "document.querySelector('.freebirdFormviewerViewResponseConfirmationMessage, .vHW8K') !== null || "
+                            "document.body.innerText.includes('Your response has been recorded') || "
+                            "document.body.innerText.includes('Submit another response')",
+                            timeout=10000
                         )
                     except:
                         # Check if a form validation error appeared (e.g., "This is a required question")

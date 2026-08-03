@@ -39,12 +39,24 @@ class WorkerResolver:
         """
         # 1. Try fetching from DB cache first (if not forcing refresh)
         if not force_refresh:
-            stmt = select(FormField).join(FormProfile).where(
+            # Try to get the mapped field for the current session first
+            stmt = select(FormField).join(FormProfile).join(FieldMapping).where(
                 FormProfile.url == form_url,
-                FormField.label.like("%worker%") | FormField.label.like("%labour%") | FormField.label.like("%employee%") | FormField.label.like("%name%")
+                FormProfile.session_id == self.session_id,
+                FieldMapping.system_field == "worker_name"
             )
             res = await self.db.execute(stmt)
-            field = res.scalar_one_or_none()
+            field = res.scalars().first()
+
+            if not field:
+                stmt = select(FormField).join(FormProfile).where(
+                    FormProfile.url == form_url,
+                    FormProfile.session_id == self.session_id,
+                    FormField.label.like("%worker%") | FormField.label.like("%labour%") | FormField.label.like("%employee%") | FormField.label.like("%name%")
+                )
+                res = await self.db.execute(stmt)
+                field = res.scalars().first()
+
             if field and field.options:
                 try:
                     options = json.loads(field.options)
@@ -65,9 +77,14 @@ class WorkerResolver:
             scraped_options.append("Carpenter_rambrid")
 
         # 3. Save / Update cache in DB
-        # Look for existing profile
-        res_profile = await self.db.execute(select(FormProfile).where(FormProfile.url == form_url))
-        profile = res_profile.scalar_one_or_none()
+        # Look for existing profile for current session
+        res_profile = await self.db.execute(
+            select(FormProfile).where(
+                FormProfile.url == form_url,
+                FormProfile.session_id == self.session_id
+            )
+        )
+        profile = res_profile.scalars().first()
         if not profile:
             profile = FormProfile(
                 session_id=self.session_id,
@@ -84,7 +101,7 @@ class WorkerResolver:
                 FormField.label.like("%worker%") | FormField.label.like("%labour%") | FormField.label.like("%employee%") | FormField.label.like("%name%")
             )
         )
-        field = res_field.scalar_one_or_none()
+        field = res_field.scalars().first()
         if not field:
             field = FormField(
                 profile_id=profile.id,

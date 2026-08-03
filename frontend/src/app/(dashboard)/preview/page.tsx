@@ -23,6 +23,7 @@ import {
   ShieldAlert,
   Zap,
   GitCompare,
+  Maximize2,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -124,6 +125,7 @@ export default function PreviewPage() {
 
   // Edit modal
   const [editingRecord, setEditingRecord] = useState<PreviewRecord | null>(null);
+  const [isMonitorExpanded, setIsMonitorExpanded] = useState(false);
 
   // Project resolution states
   const [resolutionSummaryOpen, setResolutionSummaryOpen] = useState(true);
@@ -888,8 +890,14 @@ export default function PreviewPage() {
             </div>
 
             {/* ── Right: Submission Monitor ──────────────────────── */}
-            <div className="glass-panel p-6 flex flex-col h-full">
-              <h3 className="font-bold text-slate-800 dark:text-white mb-6">Submission Monitor</h3>
+            <div 
+              onClick={() => setIsMonitorExpanded(true)}
+              className="glass-panel p-6 flex flex-col h-full cursor-pointer hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-lg transition-all group"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="font-bold text-slate-800 dark:text-white">Submission Monitor</h3>
+                <Maximize2 size={16} className="text-slate-400 group-hover:text-slate-600 dark:group-hover:text-white transition-colors" />
+              </div>
 
               {flowStatus === "idle" && (
                 <div className="flex-1 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/30 p-6 text-center gap-3">
@@ -935,9 +943,9 @@ export default function PreviewPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between text-xs font-semibold">
                       <span className={`uppercase tracking-wider ${
-                        flowStatus === "completed" ? "text-teal-500" :
-                        flowStatus === "failed" ? "text-rose-500" :
-                        flowStatus === "cancelled" ? "text-amber-500" : "text-teal-400"
+                         flowStatus === "completed" ? "text-teal-500" :
+                         flowStatus === "failed" ? "text-rose-500" :
+                         flowStatus === "cancelled" ? "text-amber-500" : "text-teal-400"
                       }`}>
                         {liveStatus.batch_status}
                       </span>
@@ -960,7 +968,10 @@ export default function PreviewPage() {
                   {/* Live Logs */}
                   <div className="flex-1 flex flex-col min-h-[160px]">
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Live Output</span>
-                    <div className="bg-slate-950 flex-1 border border-slate-800 rounded-xl p-4 overflow-y-auto font-mono text-[10px] text-teal-400 space-y-1.5 scrollbar-none shadow-inner max-h-[220px]">
+                    <div 
+                      onClick={(e) => e.stopPropagation()}
+                      className="bg-slate-950 flex-1 border border-slate-800 rounded-xl p-4 overflow-y-auto font-mono text-[10px] text-teal-400 space-y-1.5 scrollbar-none shadow-inner max-h-[220px]"
+                    >
                       {liveStatus.logs.map((log, i) => (
                         <div key={i} className="flex gap-2 leading-relaxed">
                           <span className="text-slate-600">❯</span>
@@ -982,13 +993,13 @@ export default function PreviewPage() {
                     {flowStatus === "submitting" && (
                       <>
                         <button
-                          onClick={handlePause}
+                          onClick={(e) => { e.stopPropagation(); handlePause(); }}
                           className="py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 cursor-pointer"
                         >
                           <Pause size={14} /> Pause
                         </button>
                         <button
-                          onClick={handleCancel}
+                          onClick={(e) => { e.stopPropagation(); handleCancel(); }}
                           className="py-2.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 cursor-pointer"
                         >
                           <Square size={14} /> Cancel
@@ -997,7 +1008,7 @@ export default function PreviewPage() {
                     )}
                     {(flowStatus === "completed" || flowStatus === "cancelled" || flowStatus === "failed") && (
                       <button
-                        onClick={() => router.push("/reports")}
+                        onClick={(e) => { e.stopPropagation(); router.push("/reports"); }}
                         className="col-span-2 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-lg"
                       >
                         View Final Report <ChevronRight size={14} />
@@ -1012,7 +1023,7 @@ export default function PreviewPage() {
                 <div className="flex-1 flex flex-col items-center justify-center gap-4">
                   <CheckCircle size={40} className="text-teal-500" />
                   <p className="text-sm text-slate-500">Dry run completed.</p>
-                  <button onClick={() => router.push("/reports")} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded-xl cursor-pointer">
+                  <button onClick={(e) => { e.stopPropagation(); router.push("/reports"); }} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded-xl cursor-pointer">
                     View Reports
                   </button>
                 </div>
@@ -1102,6 +1113,151 @@ export default function PreviewPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Expanded Monitor Modal */}
+      {isMonitorExpanded && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="glass-panel w-full max-w-2xl bg-white/95 dark:bg-slate-900/95 shadow-2xl p-8 relative flex flex-col max-h-[90vh]">
+            <button 
+              onClick={() => setIsMonitorExpanded(false)} 
+              className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer transition-colors"
+            >
+              <X size={20} />
+            </button>
+            
+            <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-6">Submission Monitor (Expanded)</h2>
+            
+            <div className="flex-1 flex flex-col space-y-6 overflow-y-auto pr-1">
+              {flowStatus === "idle" && (
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 border border-dashed border-slate-300 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/30 p-12 text-center gap-3">
+                  <ShieldCheck size={48} className="opacity-30" />
+                  <span className="text-sm">
+                    Click <strong>"Validate Form"</strong> first<br />
+                    to check your Google Form, then submit.
+                  </span>
+                </div>
+              )}
+
+              {flowStatus === "validated" && (
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 border border-dashed border-teal-300 dark:border-teal-800 rounded-xl bg-teal-50/30 dark:bg-teal-900/10 p-12 text-center gap-3">
+                  <CheckCircle size={48} className="text-teal-500" />
+                  <span className="text-sm text-teal-700 dark:text-teal-400">
+                    Validation passed!<br />
+                    Click <strong>"Approve & Submit"</strong> to start.
+                  </span>
+                </div>
+              )}
+
+              {(flowStatus === "submitting" || flowStatus === "completed" || flowStatus === "cancelled" || flowStatus === "failed") && liveStatus && (
+                <div className="space-y-6 flex-1 flex flex-col">
+                  {/* KPIs */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center gap-1.5 text-teal-600 dark:text-teal-400 mb-1">
+                        <Check size={16} />
+                        <span className="text-xs font-bold uppercase tracking-wider">Submitted</span>
+                      </div>
+                      <span className="text-3xl font-extrabold text-slate-800 dark:text-white">{liveStatus.submitted}</span>
+                    </div>
+                    <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 mb-1">
+                        <XCircle size={16} />
+                        <span className="text-xs font-bold uppercase tracking-wider">Failed</span>
+                      </div>
+                      <span className="text-3xl font-extrabold text-slate-800 dark:text-white">{liveStatus.failed}</span>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-sm font-semibold">
+                      <span className={`uppercase tracking-wider ${
+                        flowStatus === "completed" ? "text-teal-500" :
+                        flowStatus === "failed" ? "text-rose-500" :
+                        flowStatus === "cancelled" ? "text-amber-500" : "text-teal-400"
+                      }`}>
+                        {liveStatus.batch_status}
+                      </span>
+                      <span>{liveStatus.progress_pct}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-slate-800 h-3 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          flowStatus === "cancelled" ? "bg-amber-500" :
+                          flowStatus === "failed" ? "bg-rose-500" : "bg-teal-500 shadow-[0_0_10px_rgba(20,184,166,0.8)]"
+                        }`}
+                        style={{ width: `${liveStatus.progress_pct}%` }}
+                      />
+                    </div>
+                    <div className="text-xs text-slate-500 text-right">
+                      {liveStatus.submitted + liveStatus.failed} / {liveStatus.total} processed
+                    </div>
+                  </div>
+
+                  {/* Live Logs */}
+                  <div className="flex-1 flex flex-col min-h-[300px]">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Live Output</span>
+                    <div className="bg-slate-950 flex-1 border border-slate-800 rounded-xl p-4 overflow-y-auto font-mono text-xs text-teal-400 space-y-2 scrollbar-none shadow-inner max-h-[350px]">
+                      {liveStatus.logs.map((log, i) => (
+                        <div key={i} className="flex gap-2 leading-relaxed">
+                          <span className="text-slate-600">❯</span>
+                          <span className={`opacity-90 ${log.includes("[ERROR]") ? "text-rose-400" : log.includes("[DRY") ? "text-slate-300" : ""}`}>
+                            {log}
+                          </span>
+                        </div>
+                      ))}
+                      {liveStatus.logs.length === 0 && (
+                        <div className="flex gap-2 text-slate-600">
+                          <span>❯</span><span>Waiting for submissions…</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Controls */}
+                  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200/50 dark:border-slate-800/50">
+                    {flowStatus === "submitting" && (
+                      <>
+                        <button
+                          onClick={handlePause}
+                          className="py-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Pause size={14} /> Pause
+                        </button>
+                        <button
+                          onClick={handleCancel}
+                          className="py-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Square size={14} /> Cancel
+                        </button>
+                      </>
+                    )}
+                    {(flowStatus === "completed" || flowStatus === "cancelled" || flowStatus === "failed") && (
+                      <button
+                        onClick={() => { setIsMonitorExpanded(false); router.push("/reports"); }}
+                        className="col-span-2 py-3 bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-lg"
+                      >
+                        View Final Report <ChevronRight size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Dry run completed without live status */}
+              {flowStatus === "completed" && !liveStatus && (
+                <div className="flex-1 flex flex-col items-center justify-center gap-4 py-8">
+                  <CheckCircle size={48} className="text-teal-500" />
+                  <p className="text-sm text-slate-500">Dry run completed.</p>
+                  <button onClick={() => { setIsMonitorExpanded(false); router.push("/reports"); }} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded-xl cursor-pointer">
+                    View Reports
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
