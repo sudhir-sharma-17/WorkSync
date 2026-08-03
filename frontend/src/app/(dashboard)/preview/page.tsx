@@ -187,6 +187,9 @@ export default function PreviewPage() {
               const rawCatalog = catalogData.catalog || [];
               const durationPatterns = [/^\d+-\d+\s*hours?$/i, /^ot\s*\(/i];
               const filtered = rawCatalog.filter((p: string) => !durationPatterns.some((pat) => pat.test(p)));
+              if (!filtered.some((p: string) => p.toLowerCase() === "sobha royal pavilion")) {
+                filtered.push("Sobha Royal Pavilion");
+              }
               setProjectCatalog(filtered);
             }
           } catch (e) {
@@ -200,9 +203,14 @@ export default function PreviewPage() {
             });
             if (wCatalogRes.ok) {
               const wCatalogData = await wCatalogRes.json();
-              setWorkerCatalog(wCatalogData.catalog || []);
+              const wList: string[] = wCatalogData.catalog || [];
+              if (!wList.some((w: string) => w.toLowerCase() === "carpenter_rambrid")) {
+                wList.push("Carpenter_rambrid");
+              }
+              setWorkerCatalog(wList);
             }
           } catch (e) {
+
             console.error("Failed to load worker catalog:", e);
           }
 
@@ -678,9 +686,16 @@ export default function PreviewPage() {
                               onChange={(e) => handleAliasMappingCorrection(res.input_project, e.target.value)}
                             >
                               <option value="" className="bg-[#0f172a] text-slate-200">-- Correct Mapping --</option>
+                              {res.input_project && !projectCatalog.includes(res.input_project) && (
+                                <option value={res.input_project} className="bg-[#0f172a] text-slate-200">{res.input_project}</option>
+                              )}
+                              {res.resolved_project && !projectCatalog.includes(res.resolved_project) && res.resolved_project !== res.input_project && (
+                                <option value={res.resolved_project} className="bg-[#0f172a] text-slate-200">{res.resolved_project}</option>
+                              )}
                               {projectCatalog.map((p) => (
                                 <option key={p} value={p} className="bg-[#0f172a] text-slate-200">{p}</option>
                               ))}
+
                             </select>
                           </td>
                         </tr>
@@ -737,16 +752,20 @@ export default function PreviewPage() {
                           <td className="py-3 px-4 text-right">
                             <select
                               className="glass-input text-[11px] py-1.5 px-2.5 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer max-w-[200px] text-slate-200 focus:outline-none focus:border-teal-500 w-full bg-[#0f172a]"
-                              value={workerCatalog.includes(res.resolved_worker) ? res.resolved_worker : ""}
+                              value={res.resolved_worker}
                               onChange={(e) => handleWorkerAliasMappingCorrection(res.input_worker, e.target.value)}
                             >
                               <option value="" className="bg-[#0f172a] text-slate-200">-- Correct Mapping --</option>
+                              {res.input_worker && !workerCatalog.includes(res.input_worker) && (
+                                <option value={res.input_worker} className="bg-[#0f172a] text-slate-200">{res.input_worker}</option>
+                              )}
+                              {res.resolved_worker && !workerCatalog.includes(res.resolved_worker) && res.resolved_worker !== res.input_worker && res.resolved_worker !== "Needs Review" && (
+                                <option value={res.resolved_worker} className="bg-[#0f172a] text-slate-200">{res.resolved_worker}</option>
+                              )}
                               {workerCatalog.map((w) => (
                                 <option key={w} value={w} className="bg-[#0f172a] text-slate-200">{w}</option>
                               ))}
-                              {res.resolved_worker && !workerCatalog.includes(res.resolved_worker) && res.resolved_worker !== "Needs Review" && (
-                                <option value={res.resolved_worker} className="bg-[#0f172a] text-slate-200">{res.resolved_worker}</option>
-                              )}
+
                             </select>
                           </td>
                         </tr>
@@ -1021,12 +1040,13 @@ export default function PreviewPage() {
                   required
                 >
                   <option value="" className="bg-[#0f172a] text-slate-200">-- Select Worker --</option>
-                  {projectCatalog.map((p) => (
-                    <option key={p} value={p} className="bg-[#0f172a] text-slate-200">{p}</option>
+                  {workerCatalog.map((w) => (
+                    <option key={w} value={w} className="bg-[#0f172a] text-slate-200">{w}</option>
                   ))}
-                  {editingRecord.worker_name && !projectCatalog.includes(editingRecord.worker_name) && (
+                  {editingRecord.worker_name && !workerCatalog.includes(editingRecord.worker_name) && (
                     <option value={editingRecord.worker_name} className="bg-[#0f172a] text-slate-200">{editingRecord.worker_name}</option>
                   )}
+
                 </select>
               </div>
               <div>

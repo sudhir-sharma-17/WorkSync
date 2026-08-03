@@ -39,30 +39,32 @@ class ExcelParserService:
                 if results["debug"]["sheets_processed"] > 0:
                     break
                 
-                # Find the header row (contains 'DATES')
+                # Find the header row (contains 'DATES' or 'DATE' or 'DAY')
                 header_row_idx = -1
+                date_col_idx = 0
                 for idx, row in df.iterrows():
-                    first_cell = str(row.iloc[0]).strip().upper()
-                    if first_cell == "DATES":
-                        header_row_idx = idx
+                    for col_i in range(min(5, len(row))):
+                        val = str(row.iloc[col_i]).strip().upper()
+                        if "DATE" in val or "DAY" in val:
+                            header_row_idx = idx
+                            date_col_idx = col_i
+                            break
+                    if header_row_idx != -1:
                         break
                         
                 if header_row_idx == -1:
-                    results["errors"].append({
-                        "error": "Could not find 'DATES' header row",
-                        "sheet_name": sheet_name
-                    })
+                    results["debug"]["records_per_sheet"][sheet_name] = "Could not find DATE header row"
                     continue
                     
                 # Extract worker names from header row
                 header_row = df.iloc[header_row_idx]
                 
                 workers = []
-                for col_idx in range(1, len(header_row)):
+                for col_idx in range(date_col_idx + 1, len(header_row)):
                     val = str(header_row.iloc[col_idx]).strip()
                     if val and val.lower() not in ['nan', 'none', 'nat'] and "Unnamed" not in val:
                         # Exclude common total/summary columns
-                        if val.upper() in ["TOTAL", "GRAND TOTAL", "RATE", "REMARKS", "DATES"]:
+                        if val.upper() in ["TOTAL", "GRAND TOTAL", "RATE", "REMARKS", "DATES", "DATE", "SL NO", "S.NO", "SR NO", "SIGN", "SIGNATURE"]:
                             continue
                             
                         workers.append({
@@ -78,13 +80,14 @@ class ExcelParserService:
                 
                 for row_idx in range(header_row_idx + 1, len(df)):
                     row = df.iloc[row_idx]
-                    raw_date = row.iloc[0]
+                    raw_date = row.iloc[date_col_idx]
                     
                     str_date = str(raw_date).strip().upper()
                     if str_date in ["TOTAL", "RATE", "GRAND TOTAL"] or not str_date or str_date.lower() in ['nan', 'nat', 'none']:
                         if str_date in ["TOTAL", "RATE", "GRAND TOTAL"]:
                             break
                         continue
+
                         
                     for worker in workers:
                         worker_name = worker["name"]

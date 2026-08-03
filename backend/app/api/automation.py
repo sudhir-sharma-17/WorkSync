@@ -96,7 +96,8 @@ def _sync_playwright_background(batch_id: str, records_payload: list, form_url: 
 
 @router.get("/google/status")
 async def get_google_status(session_id: str = Depends(get_session_id)):
-    if session_id in _active_connections:
+    from app.automation.submission_engine import is_connection_active
+    if is_connection_active(session_id):
         return {"connected": False, "email": None, "connecting": True}
         
     loop = asyncio.get_running_loop()
@@ -112,38 +113,54 @@ async def get_google_status(session_id: str = Depends(get_session_id)):
 async def connect_google(session_id: str = Depends(get_session_id)):
     import os
     from playwright.async_api import async_playwright
+    from app.automation.submission_engine import mark_connection_active, mark_connection_inactive, is_connection_active
     
-    if session_id in _active_connections:
+    if is_connection_active(session_id):
         return {"connected": False, "email": None, "connecting": True}
         
     session_dir = os.path.abspath(f"playwright_sessions/{session_id}")
     os.makedirs(session_dir, exist_ok=True)
     
     async def run_headed_login_bg():
-        _active_connections.add(session_id)
+        mark_connection_active(session_id)
         try:
             async with async_playwright() as p:
-                context = await p.chromium.launch_persistent_context(
-                    user_data_dir=session_dir,
-                    headless=False,
-                    args=["--disable-blink-features=AutomationControlled"],
-                )
                 try:
-                    page = await context.new_page()
-                    await page.goto("https://accounts.google.com")
-                    while len(context.pages) > 0:
+                    context = await p.chromium.launch_persistent_context(
+                        user_data_dir=session_dir,
+                        headless=False,
+                        ignore_default_args=["--enable-automation"],
+                        args=[
+                            "--disable-blink-features=AutomationControlled",
+                            "--no-sandbox",
+                            "--disable-setuid-sandbox",
+                            "--disable-infobars",
+                        ],
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to launch persistent context for login: {e}")
+                    return
+
+                try:
+                    page = context.pages[0] if context.pages else await context.new_page()
+                    await page.goto("https://accounts.google.com", wait_until="domcontentloaded", timeout=60000)
+                    while len(context.pages) > 0 and not page.is_closed():
                         await asyncio.sleep(1)
                 except Exception as e:
-                    logger.error(f"Error in headed login: {e}")
+                    logger.error(f"Error in headed login window: {e}")
                 finally:
-                    await context.close()
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
         finally:
-            _active_connections.discard(session_id)
+            mark_connection_inactive(session_id)
                 
     loop = asyncio.get_running_loop()
     loop.run_in_executor(_playwright_pool, lambda: asyncio.run(run_headed_login_bg()))
     
     return {"connected": False, "email": None, "connecting": True}
+
 
 
 @router.post("/google/disconnect")

@@ -83,6 +83,61 @@ def _match_label(label_text: str) -> Optional[str]:
     return best_match
 
 
+def extract_form_schema(form_url: str) -> Dict[str, List[str]]:
+    """
+    Parses Google Form HTML directly and extracts all question titles and their dropdown/radio options.
+    Returns a dict mapping system field names to list of option strings.
+    """
+    import urllib.request
+    import re
+    import json
+    schema: Dict[str, List[str]] = {}
+    try:
+        req = urllib.request.Request(
+            form_url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=12) as response:
+            html = response.read().decode('utf-8', errors='ignore')
+
+        match = re.search(r'FB_PUBLIC_LOAD_DATA_\s*=\s*(.*?);</script>', html, re.DOTALL)
+        if not match:
+            return schema
+
+        data = json.loads(match.group(1))
+        questions = data[1][1]
+
+        for q in questions:
+            if not isinstance(q, list) or len(q) < 2:
+                continue
+            title = str(q[1]).strip() if q[1] else ""
+            if not title:
+                continue
+
+            sys_field = _match_label(title)
+            if not sys_field:
+                continue
+
+            options = []
+            if len(q) > 4 and q[4]:
+                sub = q[4][0]
+                if len(sub) > 1 and sub[1]:
+                    for opt in sub[1]:
+                        if opt and isinstance(opt, list) and len(opt) > 0 and opt[0]:
+                            opt_str = str(opt[0]).strip()
+                            if opt_str and opt_str not in options:
+                                options.append(opt_str)
+
+            if sys_field not in schema or len(options) > len(schema[sys_field]):
+                schema[sys_field] = options
+
+    except Exception as e:
+        logger.error(f"[FormSchemaExtractor] Error extracting schema from {form_url}: {e}")
+
+    return schema
+
+
+
 async def detect_field_map(page: Page, form_url: str) -> Tuple[Dict[str, dict], List[str], List[str]]:
     """
     Opens the Google Form and reads each question label.
@@ -148,10 +203,25 @@ async def detect_field_map(page: Page, form_url: str) -> Tuple[Dict[str, dict], 
     return field_map, found, missing
 
 
+_active_login_connections = set()
+
+def mark_connection_active(session_id: str):
+    _active_login_connections.add(session_id)
+
+def mark_connection_inactive(session_id: str):
+    _active_login_connections.discard(session_id)
+
+def is_connection_active(session_id: str) -> bool:
+    return session_id in _active_login_connections
+
+
 async def check_google_session_status(session_id: str) -> Dict[str, Any]:
     """
     Checks if there's a valid active Google login session for this session_id.
     """
+    if is_connection_active(session_id):
+        return {"connected": False, "email": None, "connecting": True}
+
     session_dir = os.path.abspath(f"playwright_sessions/{session_id}")
     if not os.path.exists(session_dir):
         return {"connected": False, "email": None}
@@ -161,15 +231,17 @@ async def check_google_session_status(session_id: str) -> Dict[str, Any]:
             context = await p.chromium.launch_persistent_context(
                 user_data_dir=session_dir,
                 headless=True,
-                args=["--disable-blink-features=AutomationControlled"],
+                ignore_default_args=["--enable-automation"],
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"],
             )
-            page = await context.new_page()
-            await page.goto("https://myaccount.google.com/email", wait_until="networkidle", timeout=10000)
+            page = context.pages[0] if context.pages else await context.new_page()
+            await page.goto("https://myaccount.google.com/email", wait_until="domcontentloaded", timeout=15000)
             
             url = page.url
             if "accounts.google.com" in url:
                 await context.close()
                 return {"connected": False, "email": None}
+
             
             email = None
             try:
