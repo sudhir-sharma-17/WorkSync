@@ -146,7 +146,11 @@ async def detect_field_map(page: Page, form_url: str) -> Tuple[Dict[str, dict], 
       found:      list of system fields that were matched
       missing:    list of required system fields that were NOT found
     """
-    await page.goto(form_url, wait_until="networkidle", timeout=30000)
+    await page.goto(form_url, wait_until="domcontentloaded", timeout=30000)
+    try:
+        await page.wait_for_selector('.Qr7Oae, div[role="listitem"], div[jsmodel], [data-params]', timeout=5000)
+    except Exception:
+        pass
 
     field_map: Dict[str, dict] = {}
 
@@ -227,13 +231,22 @@ async def check_google_session_status(session_id: str) -> Dict[str, Any]:
         return {"connected": False, "email": None}
     
     async with async_playwright() as p:
+        context = None
+        for launch_attempt in range(3):
+            try:
+                context = await p.chromium.launch_persistent_context(
+                    user_data_dir=session_dir,
+                    headless=True,
+                    ignore_default_args=["--enable-automation"],
+                    args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"],
+                )
+                break
+            except Exception as e:
+                if launch_attempt == 2:
+                    return {"connected": False, "email": None}
+                await asyncio.sleep(0.5)
+
         try:
-            context = await p.chromium.launch_persistent_context(
-                user_data_dir=session_dir,
-                headless=True,
-                ignore_default_args=["--enable-automation"],
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"],
-            )
             page = context.pages[0] if context.pages else await context.new_page()
             await page.goto("https://myaccount.google.com/email", wait_until="domcontentloaded", timeout=15000)
             
@@ -328,11 +341,25 @@ class PlaywrightSubmissionEngine:
         headless = self.mode != "test_visible"
 
         async with async_playwright() as p:
-            context = await p.chromium.launch_persistent_context(
-                user_data_dir=f"playwright_sessions/{self.session_id}",
-                headless=headless,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
+            context = None
+            for launch_attempt in range(5):
+                try:
+                    context = await p.chromium.launch_persistent_context(
+                        user_data_dir=f"playwright_sessions/{self.session_id}",
+                        headless=headless,
+                        args=[
+                            "--disable-blink-features=AutomationControlled",
+                            "--no-sandbox",
+                            "--disable-setuid-sandbox",
+                            "--disable-gpu",
+                            "--disable-dev-shm-usage",
+                        ],
+                    )
+                    break
+                except Exception as e:
+                    if launch_attempt == 4:
+                        raise e
+                    await asyncio.sleep(1.0)
             try:
                 # Auto-detect field map if not pre-supplied
                 if not field_map:
@@ -350,21 +377,62 @@ class PlaywrightSubmissionEngine:
                             await self.db.commit()
                         return
 
-                for record in valid_records:
-                    # Poll batch status (supports pause/cancel)
-                    batch = await self.db.get(UploadBatch, self.batch_id)
-                    if not batch:
-                        break
-                    while batch.status == "Paused":
-                        await asyncio.sleep(5)
-                        await self.db.refresh(batch)
-                    if batch.status == "Cancelled":
-                        break
+                current_page_holder = [None]
+                try:
+                    for record in valid_records:
+                        # Poll batch status (supports pause/cancel)
+                        batch = await self.db.get(UploadBatch, self.batch_id)
+                        if not batch:
+                            break
+                        while batch.status == "Paused":
+                            await asyncio.sleep(5)
+                            await self.db.refresh(batch)
+                        if batch.status == "Cancelled":
+                            break
 
-                    await self._process_single_record(context, record, field_map, form_url)
+                        try:
+                            await self._process_single_record(context, record, field_map, form_url, current_page_holder)
+                        except Exception as e:
+                            err_str = str(e)
+                            if "Connection closed" in err_str or "closed" in err_str or "driver" in err_str:
+                                logger.warning(f"[Engine] Browser context died. Recreating context...")
+                                try:
+                                    await context.close()
+                                except Exception:
+                                    pass
+                                context = None
+                                for launch_attempt in range(5):
+                                    try:
+                                        context = await p.chromium.launch_persistent_context(
+                                            user_data_dir=f"playwright_sessions/{self.session_id}",
+                                            headless=headless,
+                                            args=[
+                                                "--disable-blink-features=AutomationControlled",
+                                                "--no-sandbox",
+                                                "--disable-setuid-sandbox",
+                                                "--disable-gpu",
+                                                "--disable-dev-shm-usage",
+                                            ],
+                                        )
+                                        break
+                                    except Exception as launch_err:
+                                        if launch_attempt == 4:
+                                            raise launch_err
+                                        await asyncio.sleep(1.0)
+                                current_page_holder[0] = None
+                                await self._process_single_record(context, record, field_map, form_url, current_page_holder)
+                            else:
+                                pass
+                finally:
+                    if current_page_holder[0] and not current_page_holder[0].is_closed():
+                        try:
+                            await current_page_holder[0].close()
+                        except Exception:
+                            pass
 
             finally:
-                await context.close()
+                if context:
+                    await context.close()
 
     async def _process_single_record(
         self,
@@ -372,12 +440,24 @@ class PlaywrightSubmissionEngine:
         record: Dict[str, Any],
         field_map: Dict[str, dict],
         form_url: str,
+        current_page_holder: list,
     ):
         max_retries = 3
         for attempt in range(max_retries):
-            page = await context.new_page()
+            page = current_page_holder[0]
             try:
-                await page.goto(form_url, wait_until="networkidle", timeout=30000)
+                if page is None or page.is_closed():
+                    page = await context.new_page()
+                    current_page_holder[0] = page
+                    await page.goto(form_url, wait_until="domcontentloaded", timeout=30000)
+                else:
+                    submit_another_btn = page.locator('a:has-text("Submit another response"), a:has-text("Submit another")').first
+                    try:
+                        await submit_another_btn.wait_for(state="visible", timeout=1500)
+                        await submit_another_btn.click()
+                        await page.wait_for_selector('.Qr7Oae, div[role="listitem"], div[jsmodel], [data-params]', timeout=3000)
+                    except Exception:
+                        await page.goto(form_url, wait_until="domcontentloaded", timeout=30000)
 
                 for sys_field, field_info in field_map.items():
                     value = record.get(sys_field)
@@ -396,31 +476,34 @@ class PlaywrightSubmissionEngine:
                             # Open the dropdown
                             dropdown = container.locator('div[role="listbox"]')
                             await dropdown.click()
-                            # Wait for the options to appear in the DOM (Google Forms renders them globally at the bottom)
-                            await page.wait_for_timeout(500)
-                            
-                            val_str = str(value)
-                            option = page.locator('div[role="option"]').filter(has_text=val_str).first
+                            # Wait for at least one option to become visible
                             try:
-                                await option.wait_for(state="visible", timeout=1000)
-                                await option.click()
-                            except:
-                                # Fallback: grab all options and use difflib for smart fuzzy matching
-                                options = await page.locator('div[role="option"]').all()
-                                opt_map = {}
-                                for opt in options:
+                                await page.locator('div[role="option"]').first.wait_for(state="visible", timeout=2000)
+                            except Exception:
+                                pass
+                            
+                            # Grab all visible options
+                            options = await page.locator('div[role="option"]').all()
+                            opt_map = {}
+                            for opt in options:
+                                if await opt.is_visible():
                                     txt = await opt.inner_text()
+                                    opt_map[txt.strip()] = opt
                                     opt_map[txt.lower().strip()] = opt
-                                
-                                val_lower = val_str.lower().strip()
+                            
+                            val_str = str(value).strip()
+                            val_lower = val_str.lower()
+                            
+                            if val_str in opt_map:
+                                await opt_map[val_str].click()
+                            elif val_lower in opt_map:
+                                await opt_map[val_lower].click()
+                            else:
                                 best_matches = difflib.get_close_matches(val_lower, list(opt_map.keys()), n=1, cutoff=0.4)
-                                
                                 if best_matches:
                                     await opt_map[best_matches[0]].click()
                                 else:
                                     raise Exception(f"Option '{val_str}' not found in dropdown")
-                                    
-                            await page.wait_for_timeout(300)
 
                         elif input_type in ("text", "textarea"):
                             if sys_field == "attendance_date":
@@ -491,7 +574,6 @@ class PlaywrightSubmissionEngine:
                         raise Exception("Timeout waiting for submission confirmation")
 
                 await self._log_result(record, form_url, "Success", None)
-                await page.close()
                 return
 
             except Exception as e:
@@ -508,11 +590,15 @@ class PlaywrightSubmissionEngine:
                     except Exception:
                         pass
                     await self._log_result(record, form_url, "Failed", f"{error_msg} | ss: {ss_path}")
-                else:
-                    await asyncio.sleep(2**attempt)
-            finally:
-                if not page.is_closed():
+                
+                try:
                     await page.close()
+                except Exception:
+                    pass
+                current_page_holder[0] = None
+
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2**attempt)
 
     async def _log_result(
         self,

@@ -329,15 +329,20 @@ async def run_automation(
             "duration": rec.duration or "",
         })
 
-    # Launch Playwright in thread pool — HTTP returns immediately
-    background_tasks.add_task(
-        _sync_playwright_background,
-        req.batch_id,
-        records_payload,
-        form_url,
-        req.mode,
-        session_id,
-    )
+    import subprocess
+    import sys
+    import os
+
+    python_exe = sys.executable
+    script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "run_submission.py"))
+    
+    subprocess.Popen([
+        python_exe,
+        script_path,
+        "--batch-id", req.batch_id,
+        "--mode", req.mode,
+        "--session-id", session_id
+    ])
 
     return {
         "mode": req.mode,

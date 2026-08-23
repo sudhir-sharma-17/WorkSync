@@ -12,3 +12,5 @@ __pycache__/
 backend/playwright_sessions/
 backend/playwright_user_data/
 backend/reports/
+playwright_sessions/
+scratch/
